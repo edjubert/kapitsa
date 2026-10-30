@@ -1,4 +1,6 @@
 build/
+app/.build/
+app/*.app/
 *.bin
 .DS_Store
 internal/

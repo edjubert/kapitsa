@@ -8,6 +8,11 @@ from source, [CONTRIBUTING.md](../CONTRIBUTING.md); for how the engine works, [a
 | Command | What it does |
 | --- | --- |
 | `kapitsa serve [--model M] [options]` | Starts the server: the chat page at `http://127.0.0.1:8000`, the APIs under `/v1`, visible to Kapitsa on the other Macs of the network ([Several Macs](#several-macs)). Without `--model`, a terminal asks which model ([Which model](#which-model)); elsewhere it is the model picked last if it is downloaded, else the best model for this Mac ([Server options](#server-options)). |
+| `kapitsa start --name ID --model M [--port P] [--context N]` | Starts a private, independent [native runtime](native-app.md) that the app and CLI can share. |
+| `kapitsa instances [--json]` | Lists this user's local instances, including app-launched instances. |
+| `kapitsa status --instance ID [--json]` | Consults a running instance's structured status. |
+| `kapitsa resume --instance ID [--json] [--once]` | Attaches to its live dashboard; Ctrl+C detaches. |
+| `kapitsa stop --instance ID [--json]` | Stops that instance and interrupts its requests. |
 | `kapitsa cluster [--json] [--watch]` | The Macs on this network that run Kapitsa: the model each serves, how, how fast, and the link to it ([Several Macs](#several-macs)). `kapitsa macs` is the same. |
 | `kapitsa claude`, `kapitsa codex`, `kapitsa opencode`, `kapitsa pi` | Starts that coding agent on Kapitsa ([Coding agents](#coding-agents)). |
 | `kapitsa pull M... [--from DIR]...` | Downloads models without starting them. `--dry-run [--json]` shows what `M` resolves to and downloads nothing. |

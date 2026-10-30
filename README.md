@@ -6,11 +6,18 @@
 
 Kapitsa is an inference engine for Apple silicon that runs Qwen, Nemotron and Recursive's Flint models locally, built for coding agents. It starts opencode, Claude Code, Codex or pi on a local model, and serves OpenAI and Anthropic APIs.
 
+This fork adds a [native macOS menu bar app and shared local instances](docs/native-app.md).
+Build the app with `make -C app app`. The app and CLI use the same native runtime;
+multiple instances can be observed and controlled from either frontend.
+
 [Quickstart](#quickstart) · [Benchmarks](#benchmarks) · [Features](#features) · [CLI](#cli) · [Models](#supported-models) · [How KFlash works](docs/kflash.md) · [Docs](docs/usage.md)
 
 ## Quickstart
 
 **Requirements:** a Mac with Apple silicon (M1 or newer) and macOS 14 Sonoma or later.
+
+The commands below install upstream Kapitsa. For this fork's app and instance controls,
+build from this checkout as described in [Native macOS app](docs/native-app.md).
 
 **Limits:** Apple silicon only: no Linux or Windows. Flint, the four text-only Nemotrons and the 35B's `16gb` build read text only, not images ([which models read images](docs/usage.md#images)).
 
