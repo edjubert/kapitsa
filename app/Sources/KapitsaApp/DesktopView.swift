@@ -97,6 +97,7 @@ struct DesktopView: View {
             }
         }
         .frame(minWidth: 860, minHeight: 600)
+        .background(DesktopWindowMarker())
         .task { await library.refresh() }
         .sheet(isPresented: $creating) {
             NewInstanceForm(creating: $creating, initialModel: launchModel)
@@ -122,6 +123,31 @@ struct DesktopView: View {
         default: return 0
         }
     }
+}
+
+enum DesktopWindowFocus {
+    static let identifier = NSUserInterfaceItemIdentifier("kapitsa-desktop")
+
+    @MainActor static func activate() {
+        // Opening an existing SwiftUI scene need not make its NSWindow key
+        // while a status-item panel has focus. Bring the desktop forward after
+        // openWindow has had a chance to create/reveal it.
+        DispatchQueue.main.async {
+            NSApplication.shared.windows.first { $0.identifier == identifier }?.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+    }
+}
+
+struct DesktopWindowMarker: NSViewRepresentable {
+    final class Anchor: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.identifier = DesktopWindowFocus.identifier
+        }
+    }
+    func makeNSView(context: Context) -> Anchor { Anchor() }
+    func updateNSView(_ nsView: Anchor, context: Context) {}
 }
 
 struct InstancesWorkspace: View {

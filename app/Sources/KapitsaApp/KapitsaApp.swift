@@ -64,7 +64,7 @@ struct OpenDesktopCommand: View {
     var body: some View {
         Button("Ouvrir Kapitsa") {
             openWindow(id: "desktop")
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            DesktopWindowFocus.activate()
         }.keyboardShortcut("0", modifiers: .command)
     }
 }
@@ -82,7 +82,7 @@ struct InstanceMenu: View {
                 Spacer()
                 Button("Ouvrir l’app", systemImage: "macwindow") {
                     openWindow(id: "desktop")
-                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    DesktopWindowFocus.activate()
                 }.labelStyle(.iconOnly).help("Ouvrir la fenêtre Kapitsa")
                 Text("\(store.rows.filter { $0.snapshot != nil }.count) instance(s)")
                     .font(.caption).foregroundStyle(.secondary)
