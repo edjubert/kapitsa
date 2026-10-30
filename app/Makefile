@@ -12,6 +12,7 @@ app:
 	cp "$(ROOT)/build/kapitsa-runtime" "$(CONTENTS)/MacOS/kapitsa-runtime"
 	cp "$(ROOT)/build/kapitsa" "$(CONTENTS)/MacOS/kapitsa"
 	cp Info.plist "$(CONTENTS)/Info.plist"
+	swift make-icon.swift "$(CONTENTS)/Resources/Kapitsa.icns"
 	cp "$(ROOT)/LICENSE" "$(ROOT)/THIRD_PARTY_NOTICES" "$(CONTENTS)/Resources/"
 	codesign --force --sign - "$(CONTENTS)/MacOS/kapitsa-runtime"
 	codesign --force --sign - "$(CONTENTS)/MacOS/kapitsa"

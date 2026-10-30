@@ -98,7 +98,7 @@ final class InstanceStore: ObservableObject {
                 throw RuntimeFailure.message("Identifiant d’instance invalide.")
             }
             let process = Process()
-            process.executableURL = try helperURL()
+            process.executableURL = try NativeHelper.executableURL()
             let input = Pipe()
             _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
             process.standardInput = input
@@ -145,12 +145,13 @@ final class InstanceStore: ObservableObject {
         } catch { lastError = error.localizedDescription }
     }
 
-    private func helperURL() throws -> URL {
-        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/kapitsa-runtime")
-        let development = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("build/kapitsa-runtime")
-        for url in [bundled, development] where FileManager.default.isExecutableFile(atPath: url.path) { return url }
-        throw RuntimeFailure.message("Le runtime Kapitsa est absent. Reconstruis le bundle de l’app.")
+    func forget(_ row: InstanceRow) {
+        guard row.record == nil else { return }
+        profiles.removeAll { $0.instanceId == row.id }
+        if let data = try? JSONEncoder().encode(profiles) {
+            UserDefaults.standard.set(data, forKey: "runtimeProfiles")
+        }
+        rows.removeAll { $0.id == row.id }
+        if selectedId == row.id { selectedId = rows.first?.id ?? "" }
     }
 }

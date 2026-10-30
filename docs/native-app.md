@@ -1,6 +1,6 @@
 # Native macOS app and local instances
 
-This fork adds a macOS menu bar app and a local control plane to Kapitsa.
+This fork adds a native macOS desktop app, a menu bar panel and a local control plane to Kapitsa.
 The app launches `kapitsa-runtime`, a native helper linked to the same C++ server
 library as `kapitsa serve`. It reads structured state and events directly.
 It does not run CLI commands or parse terminal output to discover engine activity.
@@ -21,6 +21,36 @@ notarization and an app updater are still needed for public distribution.
 The fork's CLI updater and installer use `edjubert/kapitsa` releases;
 until this fork publishes releases, build from this checkout. Installing
 upstream's Homebrew package does not install these changes.
+
+## Desktop workspace
+
+Kapitsa opens a regular window and appears in the Dock. Its SwiftUI sidebar
+contains **Instances**, **Downloaded models**, **Catalog** and **Settings**.
+Native Liquid Glass cards are used on macOS 26; earlier versions use system
+materials. The menu bar remains available after closing the main window.
+Choose **Open app** there, or press Command+0, to reopen it.
+
+- Instances show live engine state, memory, requests and recent events.
+- The library shows all variants in Kapitsa's model store, their file sizes,
+  completion and current use. Local folders without a download manifest are
+  distinguished from incomplete downloads. Models can be revealed in Finder,
+  selected as the default, launched or moved to the Trash after confirmation.
+  Active models and models locked by a downloader are protected. Unreachable
+  instance records must be checked before removing a model. Emptying the
+  Finder Trash is what reclaims space; APFS clones may still share data.
+- The catalog comes directly from the C++ hub. Select a precision variant
+  and download it without loading the engine. Progress is structured JSON,
+  never terminal output. Interrupting preserves partial files; retrying
+  uses Kapitsa's existing resumable, checksum-verified downloader. Quitting
+  the app interrupts its own download while leaving inference instances alive.
+- Settings persist defaults for model, API port, context, slots, memory
+  budget, speculative depth, drafter, disk cache and prefill chunk. These
+  prefill the next launch, whose options remain editable; existing instances
+  keep their configuration.
+
+The menu's stop confirmation stays inside the panel rather than opening a
+modal alert that can dismiss a menu bar window when focus changes. It captures
+the selected execution, so a refresh or a restart cannot retarget the stop.
 
 In the app, choose a name, model (a catalog alias such as `27b`, or a folder),
 API port, optional context and slot count. The native runtime resolves and loads
@@ -113,8 +143,22 @@ The ready snapshot includes live memory allocation and the engine's effective
 context, slots and precision where catalog metadata is available. Engine log
 messages are exposed as structured log events; warnings and decoding metadata
 that currently exist only as log messages have not yet become separate typed
-engine events. Download byte progress, task-output replay, model management UI
-and WidgetKit are later additions.
+engine events. Task-output replay, custom repository management and WidgetKit
+are later additions.
+
+## Native model-management contract
+
+`kapitsa-runtime --model-request` reads a JSON object with `protocol: 1` and
+`action: "list"` or `action: "download"`. Downloads also require `model`.
+It invokes the C++ hub directly and never runs inference.
+
+It emits newline-delimited JSON objects: `library` (catalog and installed
+models), or `preparing`, `progress`, `complete` and `error`. Every message
+includes `protocol: 1`. Progress includes `done` and `total` bytes for the
+ranges fetched during this run, excluding files already present or resumed.
+Preparation, checksum verification and GGUF import can continue outside the
+byte-transfer phase. Errors have a message and a nonzero process exit code.
+Diagnostics go to stderr; the app saves them in `logs/model-manager.log`.
 
 ## Native helper configuration
 
@@ -145,6 +189,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j 6 --target kapitsa runtime_test
 build/runtime_test
 python3 tests/test_instances.py build
+python3 tests/test_native_models.py build
 swift test --package-path app
 ```
 
@@ -154,3 +199,6 @@ and stop. The Swift integration check connects its real HTTP client to the
 same native CPU fixture. These checks do not establish GPU behavior or inference
 performance; a real-model run remains necessary before declaring production
 readiness.
+The model API checks use a local HTTP fixture and tiny synthetic files to
+exercise the real downloader, byte progress, interruption, resumption, checksum
+verification and offline reuse without downloading real model weights.
