@@ -41,7 +41,7 @@ using json = nlohmann::ordered_json;
 
 namespace {
 
-const char* const kDefaultReleases = "https://github.com/nace-ai/kapitsa/releases";
+const char* const kDefaultReleases = "https://github.com/edjubert/kapitsa/releases";
 // packaging/release/build.sh signs every release with this identifier
 const char* const kIdentifier = "ai.nace.kapitsa";
 // Signed with a Developer ID Application certificate: the requirement codesign writes for one
@@ -751,22 +751,24 @@ bool install_harness(const std::string& from, const Install& in, std::string* wh
   return true;
 }
 
-// kapitsa-systemone and kapitsa-drex-pointer (Drex decision models, docs/systemone.md) beside the binary, where
+// Native and Drex helpers beside the binary, where
 // install.sh puts them. A release without them (all of them before they shipped) leaves whatever is installed. The
 // server's signature is held to kapitsa's requirement `req`; one that fails it, or that can't be written, is a warning
 // and the installed copy stays: the update of kapitsa itself has already happened.
 bool install_companions(const std::string& x, const Install& in, const std::string& req, std::string* why) {
-  const std::string server = join(x, "kapitsa-systemone"), pointer = join(x, "kapitsa-drex-pointer");
+  const std::string pointer = join(x, "kapitsa-drex-pointer");
   bool ok = true;
-  if (is_file(server)) {
+  for (const char* name : {"kapitsa-systemone", "kapitsa-runtime"}) {
+    const std::string server = join(x, name), expected = std::string(kIdentifier) + std::string(name).substr(7);
+    if (!is_file(server)) continue;
     chmod(server.c_str(), 0755);
     if (const std::string bad = check_signature(server, req); !bad.empty()) {
-      *why = "the kapitsa-systemone in this release: " + bad + "; the installed one is kept";
+      *why = "the " + std::string(name) + " in this release: " + bad + "; the installed one is kept";
       ok = false;
-    } else if (const std::string id = file_signing(server).identifier; id != std::string(kIdentifier) + "-systemone") {
-      *why = "the kapitsa-systemone in this release is signed as \"" + id + "\"; the installed one is kept";
+    } else if (const std::string id = file_signing(server).identifier; id != expected) {
+      *why = "the " + std::string(name) + " in this release is signed as \"" + id + "\"; the installed one is kept";
       ok = false;
-    } else if (!move(server, join(in.dir, "kapitsa-systemone"), why)) {
+    } else if (!move(server, join(in.dir, name), why)) {
       ok = false;
     }
   }

@@ -245,7 +245,7 @@ def binary(version, how="signed", identifier=IDENTIFIER):
 
 
 def tar_release(version, binary_path=None, sha256=None, files=("kapitsa", "LICENSE", "THIRD_PARTY_NOTICES"), symlink=False,
-                harness=True, companions=None):
+                harness=True, companions=None, runtime=None):
     """Serves release `version` as packaging/release/build.sh packs it: kapitsa, LICENSE, THIRD_PARTY_NOTICES and
     bench/harness in a folder of the release's name (ustar, gzip), and its .sha256 (shasum's format) or `sha256` in
     its place. Also written to TMP/dl for install.sh --from-file. Returns the tarball's path there.
@@ -273,6 +273,8 @@ def tar_release(version, binary_path=None, sha256=None, files=("kapitsa", "LICEN
         if companions:
             entry(f"{name}/kapitsa-systemone", mode=0o755, data=open(companions, "rb").read())
             entry(f"{name}/kapitsa-drex-pointer", mode=0o755, data=f"#!/bin/sh\necho drex_pointer {version}\n".encode())
+        if runtime:
+            entry(f"{name}/kapitsa-runtime", mode=0o755, data=open(runtime, "rb").read())
     data = buf.getvalue()
     sums = f"{sha256 or hashlib.sha256(data).hexdigest()}  {name}.tar.gz\n".encode()
     url = f"/releases/download/v{version}/{name}.tar.gz"
@@ -496,6 +498,29 @@ else:
     tar_release(N)
 
 # ---------------------------------------------------------------- 4. refused releases change nothing
+
+RUNTIME = os.path.join(BUILD, "kapitsa-runtime")
+if os.path.isfile(RUNTIME):
+    def runtime_companion(identifier):
+        folder = tempfile.mkdtemp(prefix="runtime-", dir=TMP)
+        path = os.path.join(folder, "kapitsa-runtime")
+        shutil.copy(RUNTIME, path)
+        sign(path, identifier)
+        return path
+    RC1, RH1 = standalone("runtime1"), home("runtime1")
+    tar_release(N, runtime=runtime_companion(IDENTIFIER + "-runtime"))
+    r = run([RC1, "update"], env(RH1))
+    installed_runtime = os.path.join(os.path.dirname(RC1), "kapitsa-runtime")
+    h = run([installed_runtime, "--help"], BASE_ENV) if os.path.isfile(installed_runtime) else None
+    check(r.returncode == 0 and h is not None and h.returncode == 0 and "protocol-v1" in h.stdout,
+          "an update installs the signed native runtime beside the CLI", r.stdout + r.stderr)
+    RC2, RH2 = standalone("runtime2"), home("runtime2")
+    tar_release(N, runtime=runtime_companion("ai.example.other"))
+    r = run([RC2, "update"], env(RH2))
+    check(r.returncode == 0 and not os.path.exists(os.path.join(os.path.dirname(RC2), "kapitsa-runtime")) and
+          "kapitsa-runtime" in r.stdout + r.stderr,
+          "a native runtime signed as another program is refused", r.stdout + r.stderr)
+    tar_release(N)
 
 S2, H2 = standalone("s2"), home("s2")
 sha2, ino2 = sha(S2), os.stat(S2).st_ino
