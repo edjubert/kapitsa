@@ -213,6 +213,7 @@ jobs:
         run: |
           build/runtime_test
           python3 tests/test_instances.py build
+          python3 tests/test_native_models.py build
       - name: Native macOS app (CPU fixture)
         if: steps.changes.outputs.code == 'true' && !cancelled()
         run: swift test --package-path app

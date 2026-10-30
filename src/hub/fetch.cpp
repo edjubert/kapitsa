@@ -564,11 +564,13 @@ struct Progress {
   uint64_t total = 0;
   std::atomic<uint64_t> done{0};
   bool show = true, tty = false;
+  std::function<void(uint64_t, uint64_t)> observer;
   std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
   std::deque<std::pair<double, uint64_t>> samples;
   double last_line = -1e9;
   double secs() const { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); }
   void print(bool final) {
+    if (observer) observer(std::min(done.load(), total), total);
     if (!show) return;
     if (term::fancy()) return draw(final);
     const double now = secs();
@@ -1478,6 +1480,7 @@ std::string ensure_impl(const ModelRef& ref, const PullOptions& opt) {
   if (!todo.empty()) {
     Progress prog;  // its total is set by download(): what is fetched now
     prog.show = opt.progress;
+    prog.observer = opt.on_progress;
     prog.tty = isatty(2);
     std::string what = (gguf ? ref.variant->gguf.path + " " : "weights ") + fmt_bytes(weights_bytes);
     if (tui) {

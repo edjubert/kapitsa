@@ -114,6 +114,9 @@ struct SpaceShort {
 struct PullOptions {
   std::vector<std::string> from;  // folders to take files from that match the pinned files' checksums
   bool progress = true;           // progress line on stderr
+  // Structured observation, independent of terminal rendering. Bytes cover the
+  // ranges fetched in this run (already present/resumed bytes are excluded).
+  std::function<void(uint64_t done, uint64_t total)> on_progress;
   // Asked when the download does not fit the disk (in a terminal, ui::make_room offers to delete other downloaded
   // models); true when it freed space, and the check runs again
   std::function<bool(const SpaceShort&)> make_room;
