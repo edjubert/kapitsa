@@ -18,10 +18,51 @@ int model_request(const ni::ojson& request) {
   if (!request.is_object() || !request.contains("protocol") ||
       request.at("protocol") != 1 || !request.at("protocol").is_number_integer())
     throw std::invalid_argument("unsupported model request protocol");
-  for (auto it = request.begin(); it != request.end(); ++it)
-    if (it.key() != "protocol" && it.key() != "action" && it.key() != "model")
-      throw std::invalid_argument("unknown model request field: " + it.key());
   const std::string action = request.at("action").get<std::string>();
+  for (auto it = request.begin(); it != request.end(); ++it)
+    if (it.key() != "protocol" && it.key() != "action" && it.key() != "model" &&
+        !(action == "capacity" && (it.key() == "configuration" || it.key() == "budget_bytes")))
+      throw std::invalid_argument("unknown model request field: " + it.key());
+  if (action == "capacity") {
+    // The frontend reads Metal's recommended working set without creating an
+    // engine/command queue. Explicit launch options use the same validator as
+    // serving; the fit itself comes from the engine's header-only startup gate.
+    const auto& value = request.at("budget_bytes");
+    if (!value.is_number_unsigned() || value.get<uint64_t>() == 0 || value.get<uint64_t>() > 4096ULL * 1000000000)
+      throw std::invalid_argument("budget_bytes must be a positive whole number, at most 4096 GB");
+    const size_t budget = value.get<uint64_t>();
+    auto options = ni::server::native_options(request.at("configuration"));
+    auto opt = options.engine;
+    opt.context = options.context_req;
+    ni::ojson capacity{{"budget_bytes", budget}, {"status", "unknown"}};
+    try {
+      auto ref = ni::hub::resolve(options.model);
+      if (ref.kind == ni::hub::ModelRef::kCatalog && !ref.variant_given) {
+        opt.context = options.context_req > 0 ? options.context_req : ni::kMinDefaultContext;
+        ref = ni::pick_variant(*ref.model, opt, budget);
+      }
+      const std::string dir = ni::hub::plan_dir(ref);
+      if (!dir.empty()) {
+        opt.context = ni::context_within_limit(dir, options.context_req);
+        const auto plan = ni::start_plan(dir, opt, budget);
+        const auto need = ni::start_need(dir, plan.load, plan.prefill_chunk, plan.context, plan.slots, budget);
+        if (!need.weights) throw std::runtime_error("model weight headers are missing");
+        const auto memory = ni::model_plan(dir, plan.prefill_chunk);
+        capacity["status"] = "known";
+        capacity["startup_bytes"] = need.bytes;
+        // One full conversation, beside the other slots' state. KV grows on
+        // demand; starting successfully does not promise every slot at capacity.
+        capacity["conversation_bytes"] = need.bytes +
+          memory.kv_per_pos * size_t(std::max(0, plan.context - 8192));
+        capacity["context"] = plan.context;
+        capacity["slots"] = plan.slots;
+      }
+    } catch (const std::exception& e) {
+      capacity["message"] = e.what();  // offline/missing/unsupported headers are not a positive fit
+    }
+    emit({{"protocol", 1}, {"type", "capacity"}, {"capacity", capacity}});
+    return 0;
+  }
   if (action == "list") {
     ni::ojson models = ni::ojson::array(), installed = ni::ojson::array();
     for (const auto& m : ni::hub::catalog()) {
@@ -82,7 +123,7 @@ int main(int argc, char** argv) {
         std::cout << "kapitsa-runtime [--config FILE] [--check]\n"
                      "Reads one protocol-v1 JSON configuration from FILE or stdin.\n"
                      "--check validates configuration without loading a model or using Metal.\n"
-                     "--model-request reads a protocol-v1 list/download request and emits JSON lines; no inference.\n";
+                     "--model-request reads a protocol-v1 list/download/capacity request and emits JSON lines; no inference.\n";
         return 0;
       } else throw std::invalid_argument("unknown runtime option");
     }
