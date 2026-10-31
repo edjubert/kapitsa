@@ -119,6 +119,16 @@ struct DesktopView: View {
                 .padding(24).frame(width: 530)
         }
         .sheet(item: $store.editing) { request in EditInstanceView(request: request) }
+        .alert("Supprimer « \(store.deletion?.name ?? "") » ?", isPresented: Binding(
+            get: { store.deletion != nil }, set: { if !$0 { store.deletion = nil } })) {
+                Button("Annuler", role: .cancel) { store.deletion = nil }
+                Button("Supprimer", role: .destructive) {
+                    if let target = store.deletion { Task { await store.delete(target) } }
+                    store.deletion = nil
+                }
+            } message: {
+                Text("L’instance sera arrêtée si elle fonctionne encore, puis sa configuration sera supprimée. Ses modèles téléchargés et son historique de chat seront conservés.")
+            }
     }
 
     @ViewBuilder private var content: some View {
@@ -181,13 +191,20 @@ struct InstancesWorkspace: View {
                             HStack {
                                 Text(row.name).font(.headline).lineLimit(1)
                                 Spacer()
-                                Circle().fill(row.snapshot == nil ? .gray : .green).frame(width: 7, height: 7)
+                                Circle().fill(row.lifecycle == "unreachable" ? .red :
+                                    row.snapshot == nil ? .gray : row.lifecycle == "ready" ? .green : .orange)
+                                    .frame(width: 7, height: 7)
                             }
                             Text(row.snapshot?.model ?? row.profile?.model ?? "Instance injoignable")
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            Text(lifecycleLabel(row.snapshot?.state ?? "stopped"))
+                            Text(lifecycleLabel(row.lifecycle))
                                 .font(.caption2).foregroundStyle(.secondary)
                         }.padding(.vertical, 5).tag(row.id)
+                        .contextMenu {
+                            Button("Supprimer l’instance…", systemImage: "trash", role: .destructive) {
+                                store.deletion = row
+                            }.disabled(store.isChanging(row.id))
+                        }
                     }
                 }.listStyle(.inset).frame(minWidth: 185, idealWidth: 220, maxWidth: 300)
                 if let row = store.selected {
@@ -213,26 +230,35 @@ struct InstanceDetailView: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(row.name).font(.largeTitle.weight(.semibold))
-                        Label(lifecycleLabel(row.snapshot?.state ?? "stopped"),
-                              systemImage: row.snapshot == nil ? "pause.circle" : "checkmark.circle.fill")
-                            .foregroundStyle(row.snapshot == nil ? Color.secondary : Color.green)
+                        Label(lifecycleLabel(row.lifecycle),
+                              systemImage: row.lifecycle == "unreachable" ? "exclamationmark.circle" :
+                                row.snapshot == nil ? "pause.circle" : "checkmark.circle.fill")
+                            .foregroundStyle(row.lifecycle == "unreachable" ? Color.red :
+                                row.snapshot == nil ? Color.secondary : row.lifecycle == "ready" ? Color.green : Color.orange)
                     }
                     Spacer()
                     if row.editableConfiguration != nil {
                         Button("Modifier", systemImage: "pencil") { store.editing = InstanceEditRequest(row) }
-                            .disabled(store.restartingIDs.contains(row.id) || row.snapshot?.state == "stopping")
+                            .disabled(store.isChanging(row.id) || row.snapshot?.state == "stopping")
                             .accessibilityIdentifier("instance-edit")
                     }
                     if row.snapshot != nil {
                         Button("Arrêter", systemImage: "stop.fill", role: .destructive) { stopTarget = row }
-                            .disabled(row.snapshot?.state == "stopping" || store.restartingIDs.contains(row.id))
+                            .disabled(row.snapshot?.state == "stopping" || store.isChanging(row.id))
                     } else if let config = row.profile {
                         Button("Démarrer", systemImage: "play.fill") { Task { await store.start(config) } }
                             .buttonStyle(.borderedProminent)
-                            .disabled(row.record != nil || store.restartingIDs.contains(row.id))
+                            .disabled(row.record != nil || store.isChanging(row.id))
                     }
+                    Button("Supprimer", systemImage: "trash", role: .destructive) { store.deletion = row }
+                        .disabled(store.isChanging(row.id))
+                        .accessibilityIdentifier("instance-delete")
                 }
-                if store.restartingIDs.contains(row.id) {
+                if store.deletingIDs.contains(row.id) {
+                    Label("Arrêt et suppression en cours…", systemImage: "trash").foregroundStyle(.secondary)
+                } else if store.startingIDs.contains(row.id) {
+                    Label("Démarrage en cours…", systemImage: "play.circle").foregroundStyle(.secondary)
+                } else if store.restartingIDs.contains(row.id) {
                     Label("Redémarrage en cours…", systemImage: "arrow.clockwise").foregroundStyle(.secondary)
                 }
                 if row.hasPendingChanges {
@@ -315,11 +341,15 @@ struct InstanceDetailView: View {
                 } else {
                     Text(row.error ?? "Cette configuration est enregistrée. Démarre-la pour charger son modèle.")
                         .foregroundStyle(.secondary)
-                    if row.record == nil {
-                        Button("Oublier cette configuration", role: .destructive) { store.forget(row) }
+                    if row.record != nil {
+                        Text("Le runtime détient encore le verrou de cette instance. Son démarrage restera indisponible tant qu’il ne sera pas arrêté.")
+                            .font(.callout).foregroundStyle(.secondary)
                     }
                 }
                 Divider()
+                Button("Voir le journal", systemImage: "doc.text") {
+                    NSWorkspace.shared.open(Registry.home.appendingPathComponent("logs/instance-\(row.id).log"))
+                }
                 Text("Fermer Kapitsa laisse les instances actives. Leur arrêt est une action explicite.")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(28)
@@ -392,6 +422,7 @@ func lifecycleLabel(_ state: String) -> String {
     case "writing": return "Génération"
     case "done": return "Terminée"
     case "stopped": return "Arrêtée"
+    case "unreachable": return "Injoignable"
     default: return state
     }
 }

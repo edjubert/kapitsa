@@ -67,6 +67,8 @@ managed CLI instance, Kapitsa saves its complete original launch configuration
 so the widget can start it again. Foreground `serve` instances can be stopped,
 but need an app profile before they can be started from the widget.
 An unreachable instance cannot be started over an existing registry owner.
+A crashed or stopped execution whose file lock is free is removed on the app's
+next refresh, making its saved profile available to **Start** again.
 A removed target never falls back to another instance.
 
 The app and sandboxed extension share a private App Group. Display snapshots
@@ -120,6 +122,17 @@ Choose **Open app** there, or press Command+0, to reopen it.
   automatic values. Foreground `serve` instances can seed an app profile from
   their known settings, with a notice that other CLI options are not imported;
   stop those instances before launching the saved profile from the app.
+- **Delete** is available in an instance's detail, context menu and menu bar
+  panel. Confirmation stops only the captured execution before removing its
+  saved profile. Downloaded models, chat history and diagnostic logs are kept.
+  A replacement execution, failed stop or shutdown timeout keeps the profile;
+  an unreachable runtime that still owns its lock cannot be deleted or started
+  over. A widget targeting a deleted instance displays a missing target.
+- Starting shows progress until the native helper publishes its control
+  connection. Immediate failures surface a bounded diagnostic from that launch
+  and retain the profile for editing or retrying. The instance's detail includes
+  a link to its log. Stopping a managed CLI instance also saves its original
+  configuration so it can subsequently be started from the app.
 - The library shows all variants in Kapitsa's model store, their file sizes,
   completion and current use. Local folders without a download manifest are
   distinguished from incomplete downloads. Models can be revealed in Finder,
@@ -257,7 +270,13 @@ have mode `0600`.
 An exclusive file lock belongs to one logical instance, not the GPU or the
 whole registry. Failed duplicate starts leave the owner's record intact.
 Records are written to a private temporary file and atomically renamed.
-Normal shutdown removes the record; crashes can leave an unreachable record.
+Destruction of the runtime removes its record, but termination by a signal or
+a crash can leave an unreachable record. The app reconciles these records by
+taking the instance's exclusive nonblocking lock and checking the captured
+execution again before removing the record. It retains the lock file, and
+never treats an unreachable endpoint or absent/reused PID alone as proof of
+shutdown. The final deletion of a saved profile uses the same lock to exclude
+a concurrent native start.
 Clients verify both IDs and the protocol on every response, including stop.
 Neither client follows control redirects. There is no central daemon in the
 inference path and no new global GPU lock.
