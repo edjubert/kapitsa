@@ -11,6 +11,14 @@ struct PreferencesView: View {
     var body: some View {
         Form {
             Section {
+                HStack {
+                    KapitsaWordmark(width: 168).padding(.vertical, 16)
+                    Spacer()
+                    Text(KapitsaBrand.version).font(.caption.monospaced()).foregroundStyle(.secondary)
+                }
+                Text("L’IA, sur votre Mac.").foregroundStyle(.secondary)
+            }
+            Section {
                 TextField("Modèle par défaut", text: $draft.model, prompt: Text("À choisir au lancement"))
                 if !library.installed.isEmpty {
                     Menu("Choisir un modèle téléchargé") {

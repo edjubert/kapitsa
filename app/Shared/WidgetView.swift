@@ -28,7 +28,7 @@ struct KapitsaWidgetView: View {
             if let instance = entry.instance { content(instance) }
             else {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Kapitsa", systemImage: "cpu").font(.headline)
+                    KapitsaWordmark(width: 128)
                     Spacer()
                     Text(entry.configured ? "Instance indisponible" : "Choisir une instance")
                         .font(.headline)
@@ -55,7 +55,8 @@ struct KapitsaWidgetView: View {
     private func content(_ value: WidgetInstance) -> some View {
         VStack(alignment: .leading, spacing: family == .systemSmall ? 7 : 12) {
             HStack {
-                Label(value.name, systemImage: "cpu").font(.headline).lineLimit(1)
+                Label { Text(value.name) } icon: { KapitsaMark() }
+                    .font(.headline).lineLimit(1)
                 Spacer(minLength: 4)
                 if family != .systemSmall {
                     Button(intent: RefreshKapitsaInstanceIntent(id: value.id)) {
