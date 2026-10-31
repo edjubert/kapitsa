@@ -203,7 +203,7 @@ struct InstanceMenu: View {
                 Button("Arrêter", role: .destructive) {
                     stopTarget = row
                 }
-                    .disabled(state.state == "stopping")
+                    .disabled(state.state == "stopping" || store.restartingIDs.contains(row.id))
             }
             if let events = store.history[state.runId], !events.isEmpty {
                 DisclosureGroup("Événements récents") {
@@ -225,7 +225,15 @@ struct InstanceMenu: View {
             Text(row.error == nil ? "Instance arrêtée" : "Instance injoignable").foregroundStyle(.secondary)
             if let profile = row.profile {
                 Button("Démarrer « \(row.name) »") { Task { await store.start(profile) } }
+                    .disabled(row.record != nil || store.restartingIDs.contains(row.id))
             }
+        }
+        if row.editableConfiguration != nil {
+            Button("Modifier l’instance…", systemImage: "pencil") {
+                store.editing = InstanceEditRequest(row)
+                openWindow(id: "desktop")
+                DesktopWindowFocus.activate()
+            }.disabled(store.restartingIDs.contains(row.id) || row.snapshot?.state == "stopping")
         }
         Button("Voir le journal") {
             NSWorkspace.shared.open(Registry.home.appendingPathComponent("logs/instance-\(row.id).log"))

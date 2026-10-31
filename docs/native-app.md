@@ -31,6 +31,16 @@ materials. The menu bar remains available after closing the main window.
 Choose **Open app** there, or press Command+0, to reopen it.
 
 - Instances show live engine state, memory, requests and recent events.
+  **Edit** in a detail or the menu opens the saved launch configuration:
+  name, model, API port, context, slots and engine options. Saving an active
+  instance defers changes until its next launch; **Save and restart** asks
+  for confirmation before interrupting requests and reloading the model.
+  The logical identity and native chat history are retained. Pending changes
+  are shown separately from the live engine settings. Managed CLI instances
+  (`kapitsa start`) expose their original requested configuration, including
+  automatic values. Foreground `serve` instances can seed an app profile from
+  their known settings, with a notice that other CLI options are not imported;
+  stop those instances before launching the saved profile from the app.
 - The library shows all variants in Kapitsa's model store, their file sizes,
   completion and current use. Local folders without a download manifest are
   distinguished from incomplete downloads. Models can be revealed in Finder,

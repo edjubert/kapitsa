@@ -106,8 +106,10 @@ struct DesktopView: View {
         .background(DesktopWindowMarker())
         .task { await library.refresh() }
         .onChange(of: chats.openRequest) { _, _ in section = .chat; chats.openingChat = false }
+        .onChange(of: store.editing?.id) { _, value in if value != nil { section = .instances } }
         .onAppear {
             if chats.openingChat { section = .chat; chats.openingChat = false }
+            if store.editing != nil { section = .instances }
         }
         .sheet(item: $launchRequest) { request in
             NewInstanceForm(creating: Binding(
@@ -115,6 +117,7 @@ struct DesktopView: View {
                 set: { if !$0 { launchRequest = nil } }), initialModel: request.model)
                 .padding(24).frame(width: 530)
         }
+        .sheet(item: $store.editing) { request in EditInstanceView(request: request) }
     }
 
     @ViewBuilder private var content: some View {
@@ -214,13 +217,31 @@ struct InstanceDetailView: View {
                             .foregroundStyle(row.snapshot == nil ? Color.secondary : Color.green)
                     }
                     Spacer()
+                    if row.editableConfiguration != nil {
+                        Button("Modifier", systemImage: "pencil") { store.editing = InstanceEditRequest(row) }
+                            .disabled(store.restartingIDs.contains(row.id) || row.snapshot?.state == "stopping")
+                            .accessibilityIdentifier("instance-edit")
+                    }
                     if row.snapshot != nil {
                         Button("Arrêter", systemImage: "stop.fill", role: .destructive) { stopTarget = row }
-                            .disabled(row.snapshot?.state == "stopping")
+                            .disabled(row.snapshot?.state == "stopping" || store.restartingIDs.contains(row.id))
                     } else if let config = row.profile {
                         Button("Démarrer", systemImage: "play.fill") { Task { await store.start(config) } }
                             .buttonStyle(.borderedProminent)
+                            .disabled(row.record != nil || store.restartingIDs.contains(row.id))
                     }
+                }
+                if store.restartingIDs.contains(row.id) {
+                    Label("Redémarrage en cours…", systemImage: "arrow.clockwise").foregroundStyle(.secondary)
+                }
+                if row.hasPendingChanges {
+                    Label("Modifications enregistrées : elles seront appliquées au prochain lancement.",
+                          systemImage: "clock.arrow.circlepath")
+                        .font(.callout).padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                }
+                if let profile = row.profile, row.record == nil || row.hasPendingChanges {
+                    InstanceConfigurationSummary(configuration: profile)
                 }
                 if let state = row.snapshot {
                     HStack(spacing: 14) {
