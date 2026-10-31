@@ -256,6 +256,13 @@ struct NewInstanceForm: View {
     @State private var launching = false
     @State private var advanced = LaunchDefaults()
 
+    private var capacityQuery: CapacityQuery {
+        var options = advanced
+        options.context = context
+        options.slots = slots
+        return CapacityQuery(model: model, defaults: options)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Nouvelle instance").font(.subheadline)
@@ -280,6 +287,7 @@ struct NewInstanceForm: View {
             DisclosureGroup("Options du moteur") {
                 EngineOptionsFields(value: $advanced)
             }
+            ModelCapacityBanner(query: capacityQuery).id(capacityQuery)
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button("Annuler") { creating = false }

@@ -28,11 +28,14 @@ class NativeModels(unittest.TestCase):
         self.files = files
         self.slow = False
         self.requests = []
+        self.ranges = []
+        self.catalog_files = {}
         test = self
 
         class Hub(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 test.requests.append(self.path)
+                test.ranges.append((self.path, self.headers.get("Range")))
                 if self.path.startswith("/api/models/fixture/tiny/revision/"):
                     body = json.dumps({"sha": "fixed", "siblings": [
                         {"rfilename": name, "size": len(data),
@@ -40,6 +43,15 @@ class NativeModels(unittest.TestCase):
                         for name, data in files.items()]}).encode()
                 elif self.path.startswith("/fixture/tiny/resolve/fixed/"):
                     body = files[self.path.rsplit("/", 1)[1]]
+                elif test.catalog_files and self.path.startswith("/api/models/") and "/revision/" in self.path:
+                    body = json.dumps({"sha": self.path.rsplit("/", 1)[1], "siblings": [
+                        {"rfilename": name, "size": len(data)}
+                        for name, data in test.catalog_files.items()]}).encode()
+                elif test.catalog_files and "/resolve/" in self.path:
+                    body = test.catalog_files.get(self.path.rsplit("/", 1)[1])
+                    if body is None:
+                        self.send_error(404)
+                        return
                 else:
                     self.send_error(404)
                     return
@@ -83,6 +95,88 @@ class NativeModels(unittest.TestCase):
                                  env=self.env, timeout=15)
         messages = [json.loads(line) for line in process.stdout.splitlines()]
         return process, messages
+
+    @staticmethod
+    def planning_files(weights):
+        # Real model shapes and a header describing large weights, but none of
+        # their data. Any accidental load would fail instead of running inference.
+        config = {"model_type": "qwen3_5_moe", "text_config": {
+            "hidden_size": 2048, "num_hidden_layers": 40, "vocab_size": 248320,
+            "linear_num_key_heads": 16, "linear_num_value_heads": 32,
+            "linear_key_head_dim": 128, "linear_value_head_dim": 128,
+            "num_attention_heads": 16, "num_key_value_heads": 2, "head_dim": 256,
+            "num_experts": 256, "num_experts_per_tok": 8,
+            "moe_intermediate_size": 512, "shared_expert_intermediate_size": 512,
+            "max_position_embeddings": 262144, "eos_token_id": 248046}}
+        header = json.dumps({"model.language_model.layers.0.mlp.switch_mlp.gate_proj.weight":
+                             {"dtype": "U8", "shape": [weights], "data_offsets": [0, weights]}}).encode()
+        return {"config.json": json.dumps(config).encode(),
+                "model.safetensors": len(header).to_bytes(8, "little") + header}
+
+    def capacity(self, model, **options):
+        return self.run_request({"protocol": 1, "action": "capacity", "budget_bytes": 16 * 10**9,
+                                 "configuration": {"protocol": 1, "model": model, **options}})
+
+    def test_capacity_distinguishes_oversized_models_and_context(self):
+        folder = self.home / "header-only"
+        folder.mkdir()
+        for weights, oversized in [(90 * 10**9, True), (100 * 10**6, False)]:
+            for name, data in self.planning_files(weights).items():
+                (folder / name).write_bytes(data)
+            process, messages = self.capacity(str(folder), context=32768, slots=2,
+                                              prefill_chunk=512, dflash="none")
+            self.assertEqual(process.returncode, 0, process.stderr)
+            plan = messages[-1]["capacity"]
+            self.assertEqual(messages[-1]["type"], "capacity")
+            self.assertEqual(plan["status"], "known")
+            self.assertEqual(plan["startup_bytes"] > plan["budget_bytes"], oversized)
+            self.assertEqual(plan["context"], 32768)
+            self.assertEqual(plan["slots"], 2)
+        _, longer = self.capacity(str(folder), context=131072, slots=4,
+                                   prefill_chunk=512, dflash="none")
+        self.assertGreater(longer[-1]["capacity"]["startup_bytes"], plan["startup_bytes"])
+        self.assertGreater(longer[-1]["capacity"]["conversation_bytes"], plan["conversation_bytes"])
+        _, capped = self.capacity(str(folder), context=1048576, slots=1, dflash="none")
+        self.assertEqual(capped[-1]["capacity"]["context"], 262144)
+        self.assertFalse(self.requests, "Local header plans must be offline")
+        self.assertLess(sum(p.stat().st_size for p in folder.iterdir()), 2000)
+
+    def test_capacity_fetches_only_catalog_headers_and_caches_them(self):
+        _, messages = self.run_request({"protocol": 1, "action": "list"})
+        model = next(m for m in messages[0]["catalog"] if m["id"] == "qwen3.6-35b-a3b")
+        variant = next(v for v in model["variants"] if v["name"] == "4bit")
+        self.catalog_files = self.planning_files(90 * 10**9)
+        process, messages = self.capacity(variant["id"], context=32768, slots=2, dflash="none")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        plan = messages[-1]["capacity"]
+        self.assertEqual(plan["status"], "known", messages)
+        self.assertGreater(plan["startup_bytes"], plan["budget_bytes"])
+        weights = [value for path, value in self.ranges if path.endswith(".safetensors")]
+        self.assertTrue(weights)
+        self.assertTrue(all(value and value.startswith("bytes=") for value in weights))
+        self.assertFalse(list((self.home / "models").glob("*")))
+        before = len(self.requests)
+        process, _ = self.capacity(variant["id"], context=32768, slots=2, dflash="none")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(len(self.requests), before)
+
+    def test_capacity_missing_headers_is_unknown_and_invalid_options_are_rejected(self):
+        folder = self.home / "no-headers"
+        folder.mkdir()
+        (folder / "config.json").write_bytes(self.planning_files(1)["config.json"])
+        process, messages = self.capacity(str(folder), context=32768, slots=2, dflash="none")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(messages[-1]["capacity"]["status"], "unknown")
+        self.assertNotIn("startup_bytes", messages[-1]["capacity"])
+        for change in [{"budget_bytes": True}, {"budget_bytes": 0}, {"budget_bytes": -1},
+                       {"budget_bytes": 1.5}, {"budget_bytes": 10**30},
+                       {"configuration": {"model": str(folder), "slots": 12}},
+                       {"configuration": {"model": str(folder), "context": "90k"}}]:
+            request = {"protocol": 1, "action": "capacity", "budget_bytes": 16 * 10**9,
+                       "configuration": {"model": str(folder)}, **change}
+            process, messages = self.run_request(request)
+            self.assertNotEqual(process.returncode, 0)
+            self.assertEqual(messages[-1]["type"], "error")
 
     def test_catalog_and_local_models_are_offline(self):
         local = self.home / "models" / "local"

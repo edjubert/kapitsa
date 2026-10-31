@@ -48,6 +48,18 @@ Choose **Open app** there, or press Command+0, to reopen it.
   prefill the next launch, whose options remain editable; existing instances
   keep their configuration.
 
+The catalog, downloaded-model details and launch form show an orange memory
+banner when the engine's header plan exceeds this Mac's budget. The estimate
+uses the selected precision, context, slots, drafter and prefill options; it
+does not equate download size with RAM. A separate warning covers a full
+conversation that would exceed the budget, or additional instances whose
+startup estimate plus existing Kapitsa allocations exceeds the shared budget.
+The shared budget uses Metal's recommended working set with the engine's
+margin; per-instance overrides do not increase the physical RAM. The current
+allocations are a changing estimate, not a reservation, and other apps are
+not accounted for. Unavailable headers show an unknown estimate, never a
+positive fit. Warnings leave downloading and launching available.
+
 The menu's stop confirmation stays inside the panel rather than opening a
 modal alert that can dismiss a menu bar window when focus changes. It captures
 the selected execution, so a refresh or a restart cannot retarget the stop.
@@ -149,7 +161,7 @@ are later additions.
 ## Native model-management contract
 
 `kapitsa-runtime --model-request` reads a JSON object with `protocol: 1` and
-`action: "list"` or `action: "download"`. Downloads also require `model`.
+`action: "list"`, `action: "download"` or `action: "capacity"`. Downloads also require `model`.
 It invokes the C++ hub directly and never runs inference.
 
 It emits newline-delimited JSON objects: `library` (catalog and installed
@@ -159,6 +171,19 @@ ranges fetched during this run, excluding files already present or resumed.
 Preparation, checksum verification and GGUF import can continue outside the
 byte-transfer phase. Errors have a message and a nonzero process exit code.
 Diagnostics go to stderr; the app saves them in `logs/model-manager.log`.
+
+Capacity requests carry `configuration` (the same validated launch object)
+and positive integer `budget_bytes`. The app reads Metal's recommended
+working set without running GPU commands. The helper uses `hub::plan_dir`,
+`start_plan` and `start_need`, reading cached/local headers or fetching
+catalog metadata and weight headers without downloading weight data.
+It emits `type: "capacity"` with a `capacity` object: `status` (`known` or
+`unknown`), `budget_bytes`, and, when known, `startup_bytes`,
+`conversation_bytes` (one conversation at the full context), `context`
+and `slots`. Aliases without a variant use the engine's automatic variant
+selection. This is a pre-load estimate, not a measured peak or a guarantee
+that all slots can fill their context simultaneously. Selection changes
+cancel the previous request; editing launch options is debounced.
 
 ## Native helper configuration
 
@@ -202,3 +227,6 @@ readiness.
 The model API checks use a local HTTP fixture and tiny synthetic files to
 exercise the real downloader, byte progress, interruption, resumption, checksum
 verification and offline reuse without downloading real model weights.
+Header-only synthetic packs also exercise memory planning for oversized and
+small models, context/slot options, metadata-only fetching, offline reuse and
+unknown estimates. Swift tests cover warning thresholds and shared budgets.

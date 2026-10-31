@@ -77,10 +77,11 @@ struct ModelMessage: Decodable, Sendable {
     let done: UInt64?
     let total: UInt64?
     let message: String?
+    let capacity: ModelCapacity?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
-        case type, modelsDir, catalog, installed, done, total, message
+        case type, modelsDir, catalog, installed, done, total, message, capacity
     }
 }
 
@@ -91,7 +92,8 @@ final class NativeModelJob: @unchecked Sendable {
     private let output = Pipe()
     private let diagnostics: FileHandle
 
-    init(action: String, model: String? = nil) throws {
+    init(action: String, model: String? = nil, configuration: RuntimeConfiguration? = nil,
+         budgetBytes: UInt64? = nil) throws {
         process.executableURL = try NativeHelper.executableURL()
         process.arguments = ["--model-request"]
         let input = Pipe()
@@ -110,6 +112,10 @@ final class NativeModelJob: @unchecked Sendable {
         process.standardError = diagnostics
         var request: [String: Any] = ["protocol": 1, "action": action]
         if let model { request["model"] = model }
+        if let configuration {
+            request["configuration"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(configuration))
+        }
+        if let budgetBytes { request["budget_bytes"] = budgetBytes }
         let data = try JSONSerialization.data(withJSONObject: request)
         try process.run()
         try input.fileHandleForWriting.write(contentsOf: data)
@@ -148,7 +154,7 @@ final class NativeModelJob: @unchecked Sendable {
                     throw RuntimeFailure.message("Le gestionnaire de modèles n’a pas répondu. Consulte son journal.")
                 }
                 guard pending.isEmpty, process.terminationStatus == 0,
-                      ["complete", "library"].contains(message.type) else {
+                      ["complete", "library", "capacity"].contains(message.type) else {
                     throw RuntimeFailure.message(message.message ?? "Le téléchargement a été interrompu. Ses fichiers partiels sont conservés.")
                 }
                 return message
@@ -170,6 +176,7 @@ final class ModelLibrary: ObservableObject {
     @Published private(set) var installed: [InstalledModel] = []
     @Published private(set) var modelsDirectory = Registry.home.appendingPathComponent("models")
     @Published private(set) var refreshing = false
+    @Published private(set) var revision = 0
     @Published private(set) var downloadId: String?
     @Published private(set) var downloaded: UInt64 = 0
     @Published private(set) var downloadTotal: UInt64 = 0
@@ -192,6 +199,7 @@ final class ModelLibrary: ObservableObject {
             modelsDirectory = URL(fileURLWithPath: path, isDirectory: true)
             self.catalog = catalog
             self.installed = installed
+            revision += 1
             error = nil
         } catch { self.error = error.localizedDescription }
     }
