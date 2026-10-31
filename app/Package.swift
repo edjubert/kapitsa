@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(name: "KapitsaApp", path: ".", exclude: ["Tests", "Widget", "Info.plist",
-            "Makefile", "make-icon.swift", "Kapitsa.entitlements"],
+            "Makefile", "make-icon.swift", "build-app.py", "Kapitsa.entitlements"],
             sources: ["Sources/KapitsaApp", "Shared"],
             swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(name: "KapitsaAppTests", dependencies: ["KapitsaApp"],

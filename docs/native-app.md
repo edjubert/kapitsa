@@ -7,7 +7,7 @@ It does not run CLI commands or parse terminal output to discover engine activit
 
 ## Build and open
 
-Apple silicon, macOS 14+, CMake 3.24+ and Swift 6 are required.
+Apple silicon, macOS 14+, CMake 3.24+ and Xcode 16+ (including Swift 6) are required.
 No new third-party runtime dependency is used.
 
 ```bash
@@ -15,12 +15,91 @@ make -C app app
 open build/Kapitsa.app
 ```
 
-The development bundle contains the app, `kapitsa-runtime`, the CLI, `LICENSE`
-and `THIRD_PARTY_NOTICES`. It is ad-hoc signed. Developer ID signing,
+The development bundle contains the app, the WidgetKit extension, `kapitsa-runtime`,
+the CLI, `LICENSE` and `THIRD_PARTY_NOTICES`. The build selects an installed
+Apple Development identity when available; otherwise it uses ad-hoc signing.
+Developer ID signing,
 notarization and an app updater are still needed for public distribution.
 The fork's CLI updater and installer use `edjubert/kapitsa` releases;
 until this fork publishes releases, build from this checkout. Installing
 upstream's Homebrew package does not install these changes.
+
+## Desktop and Notification Center widget
+
+Open Kapitsa once, then use macOS **Edit Widgets**, search for **Kapitsa**, and
+add the small, medium or large widget. Right-click the widget, choose
+**Edit Widget**, and select its instance. Several widgets can target different
+instances, including instances with identical display names: selection uses
+the stable logical ID, which is also shown in the picker.
+
+For WidgetKit/AppIntents use, install the signed app at a stable standard
+location rather than running it from a build directory:
+
+```bash
+make -C app install
+open /Applications/Kapitsa.app
+```
+
+Quit and reopen the desktop app after installing an update; its existing
+runtime instances keep running.
+The installer uses `/Applications` when writable, otherwise `~/Applications`.
+`INSTALL_DIR` overrides that location.
+
+| State | Color |
+| --- | --- |
+| Ready, idle | Green |
+| Processing requests | Blue |
+| Preparing, loading, stopping | Orange |
+| Stopped | Gray |
+| Unreachable, missing target | Red |
+
+The large widget adds memory use/budget and a gauge, context, conversation
+slots, precision, API address, active requests, generated tokens and decoding
+rate. The medium widget shows requests, rate and memory. Small widgets keep
+the model, lifecycle and start/stop command. Text and symbols complement color.
+The widget background opens the corresponding instance in the desktop app.
+
+**Start**, **Stop** and **Refresh** open the containing app and execute native
+AppIntents there. No CLI command is invoked. Starting uses the saved profile;
+stopping interrupts this instance's requests. Stop captures the displayed
+`run_id`: a stale widget cannot stop a replacement execution. When stopping a
+managed CLI instance, Kapitsa saves its complete original launch configuration
+so the widget can start it again. Foreground `serve` instances can be stopped,
+but need an app profile before they can be started from the widget.
+An unreachable instance cannot be started over an existing registry owner.
+A removed target never falls back to another instance.
+
+The app and sandboxed extension share a private App Group. Display snapshots
+contain no prompts, generated answers, API keys or control credentials.
+Connections are stored separately in a `0600` file within a `0700` directory;
+only the signed app and extension receive the group entitlement. The extension
+reads the selected runtime directly, even when the app has quit. Newly launched
+CLI instances and replacement executions are discovered when the app next
+refreshes; the widget shows an old unreachable connection until then.
+
+WidgetKit controls refresh frequency. The provider requests another update
+after 60 seconds; macOS may defer it. Lifecycle changes request a reload, and
+the widget displays the age of its last check. It is not a live per-second
+monitor. macOS may render inactive desktop widgets monochromatically according
+to the user's widget appearance settings.
+
+The build uses Xcode's native app/extension targets to extract AppIntents
+metadata, embeds the extension, signs both bundles with the same identity and
+App Group, and replaces the output bundle atomically without overwriting an
+executing runtime. The generated Xcode project stays under `build/native-app`.
+Local builds increment a shared app/extension build number there, so macOS can
+invalidate cached widget versions after an update. `BUILD_NUMBER` can override
+it for a release pipeline.
+Signing can be selected explicitly:
+
+```bash
+SIGN_IDENTITY="Apple Development: Your Name (ID)" TEAM_ID=YOURTEAMID make -C app app
+```
+
+The macOS group defaults to `TEAM_ID.io.github.edjubert.kapitsa`; `APP_GROUP`
+can override it for a distribution build. `SIGN_IDENTITY=-` builds an ad-hoc
+bundle for desktop development, but WidgetKit activation requires a valid
+Apple signing identity and matching group access.
 
 ## Desktop workspace
 
@@ -211,8 +290,8 @@ The ready snapshot includes live memory allocation and the engine's effective
 context, slots and precision where catalog metadata is available. Engine log
 messages are exposed as structured log events; warnings and decoding metadata
 that currently exist only as log messages have not yet become separate typed
-engine events. Task-output replay, custom repository management and WidgetKit
-are later additions.
+engine events. Task-output replay and custom repository management are later
+additions.
 
 ## Native model-management contract
 
@@ -292,3 +371,8 @@ usage and auth. They exercise the real URLSession client, independent histories,
 cancellation/disconnection, runtime replacement, model selection, API-key retry,
 HTTP/stream errors and truncated responses without loading an engine.
 The same fixture can populate an isolated `$KAPITSA_HOME` for native UI checks.
+Widget tests use two CPU fixtures to verify direct status reads without an app,
+private sharing without credentials in display data, start/stop AppIntents,
+CLI configuration preservation, duplicate/removed targets and stale execution
+protection. The control server closes idle observer connections so app, widget
+and CLI clients cannot reserve all of its HTTP workers.

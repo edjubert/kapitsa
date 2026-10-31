@@ -15,11 +15,18 @@
     <key>CFBundleShortVersionString</key>
     <string>0.2.0</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>KapitsaAppGroup</key>
+    <string>$(KAPITSA_APP_GROUP)</string>
+    <key>CFBundleURLTypes</key>
+    <array><dict>
+        <key>CFBundleURLName</key><string>io.github.edjubert.kapitsa.instance</string>
+        <key>CFBundleURLSchemes</key><array><string>kapitsa</string></array>
+    </dict></array>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
