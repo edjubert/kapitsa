@@ -1365,8 +1365,11 @@ int ni::server::run_service(Options config) {
     m.tok_s = std::round(ui::recent_tok_s() * 10) / 10;
   });
   common_routes(srv, api_key, timing, info);
-  srv.Get("/v1/models", [model_mgr](const httplib::Request&, httplib::Response& res) {
-    res.set_content(model_mgr->list_models_json().dump(), "application/json");
+  srv.Get("/v1/models", [model_mgr, timing](const httplib::Request&, httplib::Response& res) {
+    auto models = model_mgr->list_models_json();
+    models["allow_switch"] = model_mgr->allow_switch();
+    models["timing"] = timing;
+    res.set_content(models.dump(), "application/json");
   });
   srv.Get(R"(/v1/models/(.+))", [model_mgr](const httplib::Request& req, httplib::Response& res) {
     const std::string mid = req.matches[1].str();
