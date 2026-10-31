@@ -107,6 +107,7 @@ struct DesktopView: View {
         .task { await library.refresh() }
         .onChange(of: chats.openRequest) { _, _ in section = .chat; chats.openingChat = false }
         .onChange(of: store.editing?.id) { _, value in if value != nil { section = .instances } }
+        .onChange(of: store.widgetOpenRequest) { _, _ in section = .instances }
         .onAppear {
             if chats.openingChat { section = .chat; chats.openingChat = false }
             if store.editing != nil { section = .instances }

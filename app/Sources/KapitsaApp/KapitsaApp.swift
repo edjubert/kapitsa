@@ -4,10 +4,23 @@ import AppKit
 @main
 struct KapitsaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @StateObject private var store = InstanceStore()
+    @StateObject private var store: InstanceStore
     @StateObject private var library = ModelLibrary()
     @StateObject private var settings = AppSettings()
     @StateObject private var chats = ChatStore()
+
+    init() {
+        let instances = InstanceStore()
+        _store = StateObject(wrappedValue: instances)
+        WidgetActionRouter.perform = { [weak instances] command in
+            guard let instances else { throw RuntimeFailure.message("Kapitsa se ferme.") }
+            do {
+                try await instances.handleWidget(command)
+                instances.lastError = nil
+            }
+            catch { instances.lastError = error.localizedDescription; throw error }
+        }
+    }
 
     var body: some Scene {
         Window("Kapitsa", id: "desktop") {
@@ -17,6 +30,16 @@ struct KapitsaApp: App {
                 .environmentObject(settings)
                 .environmentObject(chats)
                 .onAppear { delegate.cancelActivities = { library.cancelDownload(); chats.stopAll() } }
+                .onOpenURL { url in
+                    guard url.scheme == "kapitsa", url.host == "instance",
+                          url.pathComponents.count == 2 else { return }
+                    let id = url.lastPathComponent
+                    Task {
+                        do { try await store.handleWidget(.refresh(id)) }
+                        catch { store.lastError = error.localizedDescription }
+                        DesktopWindowFocus.activate()
+                    }
+                }
         }
         .defaultSize(width: 1120, height: 760)
         .windowResizability(.contentMinSize)
