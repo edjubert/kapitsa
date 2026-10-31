@@ -65,6 +65,12 @@ struct DownloadedModelsView: View {
                                 .buttonStyle(.borderedProminent).disabled(!model.runnable)
                         }
                         Text(model.dir).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        if model.runnable {
+                            ModelCapacityBanner(query: CapacityQuery(model: model.dir, defaults: settings.defaults),
+                                alreadyRunning: model.used(by: store.rows, catalog: library.catalog),
+                                refreshID: library.revision)
+                                .id(CapacityQuery(model: model.dir, defaults: settings.defaults))
+                        }
                         HStack {
                             if !model.complete, let variant = catalogVariant(for: model) {
                                 Button("Reprendre le téléchargement", systemImage: "arrow.down.circle") {
@@ -100,6 +106,8 @@ struct DownloadedModelsView: View {
 
 struct CatalogView: View {
     @EnvironmentObject private var library: ModelLibrary
+    @EnvironmentObject private var store: InstanceStore
+    @EnvironmentObject private var settings: AppSettings
     var launch: (String) -> Void
     @State private var search = ""
     @State private var selection: String?
@@ -145,6 +153,11 @@ struct CatalogView: View {
                                         value: String(format: "%.1f GB", variant.downloadGb))
                                     Text(variant.repo).font(.caption).foregroundStyle(.secondary)
                                         .textSelection(.enabled)
+                                    ModelCapacityBanner(query: CapacityQuery(model: variant.id, defaults: settings.defaults),
+                                        alreadyRunning: library.installed.first { $0.dir == variant.dir }?
+                                            .used(by: store.rows, catalog: library.catalog) ?? false,
+                                        refreshID: library.revision)
+                                        .id(CapacityQuery(model: variant.id, defaults: settings.defaults))
                                     if let installed = library.installed.first(where: { $0.dir == variant.dir && $0.complete }) {
                                         Label("Déjà téléchargé", systemImage: "checkmark.circle.fill")
                                             .foregroundStyle(.green)

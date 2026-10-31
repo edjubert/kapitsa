@@ -23,11 +23,15 @@ enum DesktopSection: String, CaseIterable, Identifiable {
 }
 
 struct DesktopView: View {
+    private struct LaunchRequest: Identifiable {
+        let id = UUID()
+        let model: String
+    }
+
     @EnvironmentObject private var store: InstanceStore
     @EnvironmentObject private var library: ModelLibrary
     @State private var section: DesktopSection? = .instances
-    @State private var creating = false
-    @State private var launchModel = ""
+    @State private var launchRequest: LaunchRequest?
 
     var body: some View {
         NavigationSplitView {
@@ -89,8 +93,7 @@ struct DesktopView: View {
                         Task { await store.refresh(); await library.refresh() }
                     }.help("Actualiser les instances et les modèles")
                     Button("Nouvelle instance", systemImage: "plus") {
-                        launchModel = ""
-                        creating = true
+                        launchRequest = LaunchRequest(model: "")
                     }
                     .help("Démarrer une nouvelle instance")
                 }
@@ -99,8 +102,10 @@ struct DesktopView: View {
         .frame(minWidth: 860, minHeight: 600)
         .background(DesktopWindowMarker())
         .task { await library.refresh() }
-        .sheet(isPresented: $creating) {
-            NewInstanceForm(creating: $creating, initialModel: launchModel)
+        .sheet(item: $launchRequest) { request in
+            NewInstanceForm(creating: Binding(
+                get: { launchRequest != nil },
+                set: { if !$0 { launchRequest = nil } }), initialModel: request.model)
                 .padding(24).frame(width: 530)
         }
     }
@@ -109,9 +114,9 @@ struct DesktopView: View {
         switch section ?? .instances {
         case .instances: InstancesWorkspace()
         case .downloaded:
-            DownloadedModelsView { model in launchModel = model; creating = true }
+            DownloadedModelsView { model in launchRequest = LaunchRequest(model: model) }
         case .catalog:
-            CatalogView { model in launchModel = model; creating = true }
+            CatalogView { model in launchRequest = LaunchRequest(model: model) }
         case .settings: PreferencesView()
         }
     }
