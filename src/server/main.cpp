@@ -330,6 +330,9 @@ static void print_help() {
          "  or a model folder, or a .gguf file (converted once into a model folder).\n\n"
          "Commands:\n"
          "  serve        start the server: chat page at /, OpenAI and Anthropic APIs at /v1 (kapitsa serve --help)\n"
+         "  instances    local instances, including those started by the macOS app\n"
+         "  start        start an independent instance (kapitsa start --help)\n"
+         "  status, resume, stop --instance ID   consult, observe or stop a local instance\n"
          "  claude, codex, opencode, pi [--model M] [--port P] [--ctx N] [--api-key K] [agent args]\n"
          "               start that coding agent on Kapitsa: on the server already running on the port, else on one\n"
          "               started for it (with a context sized for agents; kapitsa claude --help)\n"
@@ -2039,6 +2042,12 @@ int ni::run_cli(int argc, char** argv) {
   auto_update(argc, argv);
   if (cmd.empty() || cmd == "--help" || cmd == "-h" || cmd == "help") {
     if (argc > 2 && !strcmp(argv[2], "serve")) print_serve_help();
+    else if (argc > 2 && (std::string(argv[2]) == "instances" || std::string(argv[2]) == "start" ||
+                         std::string(argv[2]) == "status" || std::string(argv[2]) == "resume" || std::string(argv[2]) == "stop")) {
+      char h[] = "--help";
+      char* a[] = {argv[0], argv[2], h, nullptr};
+      return run_instances(argv[2], 3, a, 2);
+    }
     else if (argc > 2 && !strcmp(argv[2], "pull")) print_pull_help();
     else if (argc > 2 && !strcmp(argv[2], "update")) {
       char h[] = "--help";
@@ -2057,6 +2066,8 @@ int ni::run_cli(int argc, char** argv) {
     return 0;
   }
   if (cmd == "serve") return serve(argc, argv, 2);
+  if (cmd == "instances" || cmd == "start" || cmd == "status" || cmd == "resume" || cmd == "stop")
+    return run_instances(cmd, argc, argv, 2);
   if (cmd == "pull") return pull(argc, argv);
   if (cmd == "list" || cmd == "ls") return list(argc, argv);
   if (cmd == "rm") return rm(argc, argv);

@@ -181,6 +181,7 @@ add_custom_command(
 add_library(kapitsa_server STATIC ${CMAKE_SOURCE_DIR}/src/server/main.cpp ${CMAKE_SOURCE_DIR}/src/server/native_execution.cpp
   ${CMAKE_SOURCE_DIR}/src/server/http_stream.cpp
   ${CMAKE_SOURCE_DIR}/src/server/runtime.cpp ${CMAKE_SOURCE_DIR}/src/server/service_config.cpp
+  ${CMAKE_SOURCE_DIR}/src/server/instances_cmd.cpp
   ${CMAKE_SOURCE_DIR}/src/server/launch.cpp
   ${CMAKE_SOURCE_DIR}/src/server/ui.cpp ${CMAKE_SOURCE_DIR}/src/server/beam.cpp ${CMAKE_SOURCE_DIR}/src/server/picker.cpp
   ${CMAKE_SOURCE_DIR}/src/server/bench_cmd.cpp ${CMAKE_SOURCE_DIR}/src/server/update_cmd.cpp

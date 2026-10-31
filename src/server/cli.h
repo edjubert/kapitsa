@@ -7,6 +7,7 @@
 #include <string>
 
 namespace ni {
+int run_instances(const std::string& command, int argc, char** argv, int first);
 
 // This build's version (CMakeLists.txt's KAPITSA_VERSION), as `kapitsa --version` prints it: the one copy the update
 // code compares (main.cpp)
