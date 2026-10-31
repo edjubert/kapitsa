@@ -41,6 +41,8 @@ final class InstanceStore: ObservableObject {
     @Published var lastError: String?
     @Published var editing: InstanceEditRequest?
     @Published private(set) var restartingIDs: Set<String> = []
+    @Published var widgetOpenRequest = UUID()
+    private let widgetPublisher: WidgetPublisher?
     private let client = RuntimeClient()
     private let preferences: UserDefaults
     private let runtimeHome: URL
@@ -58,6 +60,8 @@ final class InstanceStore: ObservableObject {
         self.preferences = preferences
         runtimeHome = home
         self.launcher = launcher
+        widgetPublisher = home == Registry.home && preferences === UserDefaults.standard ?
+            WidgetSharedStorage.shared.map { WidgetPublisher(storage: $0) } : nil
         if let data = preferences.data(forKey: "runtimeProfiles") {
             profiles = (try? JSONDecoder().decode([RuntimeConfiguration].self, from: data)) ?? []
         }
@@ -75,7 +79,12 @@ final class InstanceStore: ObservableObject {
     var activeRequests: Int { rows.reduce(0) { $0 + ($1.snapshot?.requests.count ?? 0) } }
 
     func refresh() async {
-        guard !refreshing else { return }
+        // A cold-start AppIntent must wait for the app's initial discovery,
+        // rather than looking for its target in an empty or outdated list.
+        while refreshing {
+            guard !Task.isCancelled else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
         refreshing = true
         defer { refreshing = false }
         let records = records()
@@ -119,6 +128,7 @@ final class InstanceStore: ObservableObject {
         let runs = Set(records.map(\.runId))
         self.cursors = self.cursors.filter { runs.contains($0.key) }
         history = history.filter { runs.contains($0.key) }
+        widgetPublisher?.publish(rows)
     }
 
     func stop(_ row: InstanceRow) async {
@@ -296,5 +306,42 @@ final class InstanceStore: ObservableObject {
         }
         rows.removeAll { $0.id == row.id }
         if selectedId == row.id { selectedId = rows.first?.id ?? "" }
+        widgetPublisher?.publish(rows)
+    }
+
+    func handleWidget(_ command: WidgetCommand) async throws {
+        let id: String
+        switch command {
+        case .start(let value), .stop(let value, _), .refresh(let value): id = value
+        }
+        guard RuntimeRecord.validId(id) else { throw RuntimeFailure.message("Instance invalide.") }
+        await refresh()
+        guard let row = rows.first(where: { $0.id == id }) else {
+            throw RuntimeFailure.message("Cette instance n’existe plus. Modifie la cible du widget.")
+        }
+        selectedId = id
+        widgetOpenRequest = UUID()
+        switch command {
+        case .start:
+            guard row.record == nil, let config = row.profile else {
+                throw RuntimeFailure.message("Cette instance est déjà active ou n’a pas de configuration enregistrée.")
+            }
+            guard await start(config) else {
+                throw RuntimeFailure.message(lastError ?? "Le démarrage a échoué.")
+            }
+        case .stop(_, let run):
+            guard RuntimeRecord.validId(run), let record = row.record, record.runId == run else {
+                throw RuntimeFailure.message("L’instance a redémarré depuis l’affichage du widget. Actualise-le avant de l’arrêter.")
+            }
+            // Keep the full original options of a managed CLI instance so
+            // this same widget can start it again after its record disappears.
+            if row.profile == nil, row.snapshot?.managed == true,
+               let configuration = row.snapshot?.configuration?.value {
+                try persist(configuration)
+            }
+            try await client.stop(record)
+            await refresh()
+        case .refresh: break
+        }
     }
 }
