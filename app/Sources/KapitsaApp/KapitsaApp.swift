@@ -7,6 +7,7 @@ struct KapitsaApp: App {
     @StateObject private var store = InstanceStore()
     @StateObject private var library = ModelLibrary()
     @StateObject private var settings = AppSettings()
+    @StateObject private var chats = ChatStore()
 
     var body: some Scene {
         Window("Kapitsa", id: "desktop") {
@@ -14,7 +15,8 @@ struct KapitsaApp: App {
                 .environmentObject(store)
                 .environmentObject(library)
                 .environmentObject(settings)
-                .onAppear { delegate.cancelDownloads = { library.cancelDownload() } }
+                .environmentObject(chats)
+                .onAppear { delegate.cancelActivities = { library.cancelDownload(); chats.stopAll() } }
         }
         .defaultSize(width: 1120, height: 760)
         .windowResizability(.contentMinSize)
@@ -24,7 +26,7 @@ struct KapitsaApp: App {
             }
         }
         MenuBarExtra {
-            InstanceMenu().environmentObject(store).environmentObject(settings)
+            InstanceMenu().environmentObject(store).environmentObject(settings).environmentObject(chats)
         } label: {
             RuntimeBarLabel(store: store)
         }
@@ -45,7 +47,7 @@ struct RuntimeBarLabel: View {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var cancelDownloads: (() -> Void)?
+    var cancelActivities: (() -> Void)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
@@ -55,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationWillTerminate(_ notification: Notification) {
-        cancelDownloads?()
+        cancelActivities?()
     }
 }
 
@@ -71,6 +73,7 @@ struct OpenDesktopCommand: View {
 
 struct InstanceMenu: View {
     @EnvironmentObject private var store: InstanceStore
+    @EnvironmentObject private var chats: ChatStore
     @Environment(\.openWindow) private var openWindow
     @State private var creating = false
     @State private var stopTarget: InstanceRow?
@@ -192,7 +195,9 @@ struct InstanceMenu: View {
             }
             HStack {
                 Button("Ouvrir le chat") {
-                    if let url = URL(string: state.apiUrl) { NSWorkspace.shared.open(url) }
+                    chats.open(row.id)
+                    openWindow(id: "desktop")
+                    DesktopWindowFocus.activate()
                 }.disabled(state.state != "ready")
                 Spacer()
                 Button("Arrêter", role: .destructive) {

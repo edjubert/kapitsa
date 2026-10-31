@@ -25,7 +25,7 @@ upstream's Homebrew package does not install these changes.
 ## Desktop workspace
 
 Kapitsa opens a regular window and appears in the Dock. Its SwiftUI sidebar
-contains **Instances**, **Downloaded models**, **Catalog** and **Settings**.
+contains **Instances**, **Chat**, **Downloaded models**, **Catalog** and **Settings**.
 Native Liquid Glass cards are used on macOS 26; earlier versions use system
 materials. The menu bar remains available after closing the main window.
 Choose **Open app** there, or press Command+0, to reopen it.
@@ -63,6 +63,52 @@ positive fit. Warnings leave downloading and launching available.
 The menu's stop confirmation stays inside the panel rather than opening a
 modal alert that can dismiss a menu bar window when focus changes. It captures
 the selected execution, so a refresh or a restart cannot retarget the stop.
+
+## Native chat
+
+**Open chat** in an instance's detail or menu opens the desktop's native SwiftUI
+conversation. Its instance picker includes both app- and CLI-started instances.
+It uses the instance's inference HTTP API directly, without invoking the CLI or
+embedding the web page. Independent instances can stream replies simultaneously.
+
+- Streaming responses, a Thinking toggle, collapsible reasoning and cancellation.
+  **Stop** closes only this chat's request; it leaves the runtime and other
+  requests running. Changing the selected instance preserves its conversation
+  and any active reply. Quitting the app cancels its own chat requests.
+- Image attachments through a file panel, paste or drag and drop, with removable
+  previews. The limit is 16 images per message, 20 MB and 40 megapixels per image.
+- Native Markdown paragraphs, headings, emphasis, HTTP links, quotes, lists,
+  tables and fenced code with a copy button. Generated HTML is not executed.
+  The transcript follows new text near its bottom and lets readers scroll back.
+- Enter sends; Shift+Enter inserts a newline. Input-method composition does not
+  accidentally send a message. The composer accepts plain text.
+- Tokens, decoding rate, first-token time, reasoning duration, prompt-reading
+  rate, cached tokens, interruption and token-limit status use the same streamed
+  fields as the web chat. The server's timing setting controls displayed timings.
+- Model selection lists downloaded and catalog models. Switching is available
+  only when the server allows it; catalog selection can download weights.
+  App-managed runtimes keep switching disabled, so choose another instance or
+  launch one with the desired model. A server started with `serve --allow-switch`
+  permits changing its model.
+- Protected inference APIs prompt for their own API key, stored in the macOS
+  Keychain. The runtime's private control token is never sent to inference routes.
+  Chat requests reject redirects and use only validated loopback HTTP endpoints.
+
+One conversation and its Thinking preference are stored per logical
+`instance_id`, in `$KAPITSA_HOME/chats/INSTANCE.json`. This directory has mode
+`0700`; atomic history files have mode `0600`. Text, reasoning and images stay
+on disk across app and runtime restarts. **New conversation** clears only the
+selected instance's history. An unreadable history is preserved until the user
+explicitly starts a new conversation. The web page's separate browser history
+is not imported.
+
+The app sends the web chat's `/v1/chat/completions` schema, including image data
+URLs, `stream_options.include_usage`, `chat_template_kwargs.enable_thinking` and
+the active model's context fit as `max_tokens`. Only user input and assistant
+answers are replayed; reasoning, local errors and timing metadata are excluded.
+`GET /v1/models` adds root-level `allow_switch` and `timing` fields while retaining
+the existing model list. Interrupted or failed replies keep any text already
+received; failures before output restore the user's input for retry.
 
 In the app, choose a name, model (a catalog alias such as `27b`, or a folder),
 API port, optional context and slot count. The native runtime resolves and loads
@@ -230,3 +276,9 @@ verification and offline reuse without downloading real model weights.
 Header-only synthetic packs also exercise memory planning for oversized and
 small models, context/slot options, metadata-only fetching, offline reuse and
 unknown estimates. Swift tests cover warning thresholds and shared budgets.
+The native chat's Swift tests start `tests/fixtures/native_chat_server.py`:
+three loopback servers with synthetic UTF-8 SSE, reasoning, Markdown, images,
+usage and auth. They exercise the real URLSession client, independent histories,
+cancellation/disconnection, runtime replacement, model selection, API-key retry,
+HTTP/stream errors and truncated responses without loading an engine.
+The same fixture can populate an isolated `$KAPITSA_HOME` for native UI checks.
