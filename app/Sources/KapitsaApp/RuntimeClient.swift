@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-struct RuntimeRecord: Decodable, Sendable {
+struct RuntimeRecord: Codable, Equatable, Sendable {
     let protocolVersion: Int
     let instanceId: String
     let runId: String
@@ -158,6 +158,8 @@ actor RuntimeClient {
         session = URLSession(configuration: config, delegate: LocalOnlySession(), delegateQueue: nil)
     }
 
+    deinit { session.invalidateAndCancel() }
+
     nonisolated static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -166,6 +168,10 @@ actor RuntimeClient {
 
     func fetch(_ record: RuntimeRecord, cursor: UInt64 = 0) async throws -> RuntimeSnapshot {
         try await request(record, path: "/v1/events?after=\(cursor)")
+    }
+
+    func status(_ record: RuntimeRecord) async throws -> RuntimeSnapshot {
+        try await request(record, path: "/v1/status")
     }
 
     func stop(_ record: RuntimeRecord) async throws {
