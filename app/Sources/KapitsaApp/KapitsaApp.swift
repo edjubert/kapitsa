@@ -136,7 +136,7 @@ struct InstanceMenu: View {
             if !store.rows.isEmpty {
                 Picker("Instance", selection: $store.selectedId) {
                     ForEach(store.rows) { row in
-                        Text("\(row.name) · \(row.snapshot == nil ? "arrêtée" : "active")").tag(row.id)
+                        Text("\(row.name) · \(row.record == nil ? "arrêtée" : row.snapshot == nil ? "injoignable" : "active")").tag(row.id)
                     }
                 }
                 if let row = store.selected { instance(row) }
@@ -226,7 +226,7 @@ struct InstanceMenu: View {
                 Button("Arrêter", role: .destructive) {
                     stopTarget = row
                 }
-                    .disabled(state.state == "stopping" || store.restartingIDs.contains(row.id))
+                    .disabled(state.state == "stopping" || store.isChanging(row.id))
             }
             if let events = store.history[state.runId], !events.isEmpty {
                 DisclosureGroup("Événements récents") {
@@ -248,7 +248,7 @@ struct InstanceMenu: View {
             Text(row.error == nil ? "Instance arrêtée" : "Instance injoignable").foregroundStyle(.secondary)
             if let profile = row.profile {
                 Button("Démarrer « \(row.name) »") { Task { await store.start(profile) } }
-                    .disabled(row.record != nil || store.restartingIDs.contains(row.id))
+                    .disabled(row.record != nil || store.isChanging(row.id))
             }
         }
         if row.editableConfiguration != nil {
@@ -256,8 +256,13 @@ struct InstanceMenu: View {
                 store.editing = InstanceEditRequest(row)
                 openWindow(id: "desktop")
                 DesktopWindowFocus.activate()
-            }.disabled(store.restartingIDs.contains(row.id) || row.snapshot?.state == "stopping")
+            }.disabled(store.isChanging(row.id) || row.snapshot?.state == "stopping")
         }
+        Button("Supprimer l’instance…", systemImage: "trash", role: .destructive) {
+            openWindow(id: "desktop")
+            DesktopWindowFocus.activate()
+            store.deletion = row
+        }.disabled(store.isChanging(row.id))
         Button("Voir le journal") {
             NSWorkspace.shared.open(Registry.home.appendingPathComponent("logs/instance-\(row.id).log"))
         }.font(.caption)

@@ -12,6 +12,8 @@ struct InstanceRow: Identifiable {
     var pendingEdit = false
     var requiresManualStop = false
 
+    var lifecycle: String { snapshot?.state ?? (record == nil ? "stopped" : "unreachable") }
+
     var editableConfiguration: RuntimeConfiguration? {
         if let profile { return profile }
         if let config = snapshot?.configuration { return config.value }
@@ -40,6 +42,9 @@ final class InstanceStore: ObservableObject {
     @Published var history: [String: [RuntimeEvent]] = [:]
     @Published var lastError: String?
     @Published var editing: InstanceEditRequest?
+    @Published var deletion: InstanceRow?
+    @Published private(set) var startingIDs: Set<String> = []
+    @Published private(set) var deletingIDs: Set<String> = []
     @Published private(set) var restartingIDs: Set<String> = []
     @Published var widgetOpenRequest = UUID()
     private let widgetPublisher: WidgetPublisher?
@@ -77,6 +82,9 @@ final class InstanceStore: ObservableObject {
 
     var selected: InstanceRow? { rows.first { $0.id == selectedId } }
     var activeRequests: Int { rows.reduce(0) { $0 + ($1.snapshot?.requests.count ?? 0) } }
+    func isChanging(_ id: String) -> Bool {
+        startingIDs.contains(id) || restartingIDs.contains(id) || deletingIDs.contains(id)
+    }
 
     func refresh() async {
         // A cold-start AppIntent must wait for the app's initial discovery,
@@ -132,8 +140,12 @@ final class InstanceStore: ObservableObject {
     }
 
     func stop(_ row: InstanceRow) async {
-        guard let record = row.record else { return }
+        guard let record = row.record, !isChanging(row.id) else { return }
         do {
+            guard records().first(where: { $0.instanceId == row.id })?.runId == record.runId else {
+                throw RuntimeFailure.message("L’instance a changé depuis la confirmation. Actualise sa fiche.")
+            }
+            try preserveConfiguration(row)
             try await client.stop(record)
             lastError = nil
             await refresh()
@@ -142,20 +154,37 @@ final class InstanceStore: ObservableObject {
 
     @discardableResult
     func start(_ config: RuntimeConfiguration) async -> Bool {
+        guard !isChanging(config.instanceId) else {
+            lastError = "Une opération est déjà en cours sur cette instance."
+            return false
+        }
+        return await startRuntime(config)
+    }
+
+    private func startRuntime(_ config: RuntimeConfiguration) async -> Bool {
+        startingIDs.insert(config.instanceId)
+        defer { startingIDs.remove(config.instanceId) }
         do {
             try validate(config)
             guard !records().contains(where: { $0.instanceId == config.instanceId }),
                   children[config.instanceId]?.isRunning != true else {
                 throw RuntimeFailure.message("Cette instance fonctionne déjà. Actualise sa fiche.")
             }
-            let process = try launcher?(config) ?? launchNative(config)
+            let logURL = runtimeHome.appendingPathComponent("logs/instance-\(config.instanceId).log")
+            let logOffset = (try? logURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            let process = try launcher?(config) ?? NativeHelper.launch(config, home: runtimeHome)
             children[config.instanceId] = process
             process.terminationHandler = { [weak self] process in
                 Task { @MainActor in
                     guard self?.children[config.instanceId] === process else { return }
                     self?.children.removeValue(forKey: config.instanceId)
-                    if process.terminationStatus != 0 && process.terminationReason == .exit {
-                        self?.lastError = "L’instance « \(config.name) » s’est arrêtée (code \(process.terminationStatus)). Consulte son journal."
+                    if process.terminationStatus != 0 &&
+                        self?.startingIDs.contains(config.instanceId) != true &&
+                        self?.deletingIDs.contains(config.instanceId) != true &&
+                        self?.restartingIDs.contains(config.instanceId) != true &&
+                        !(process.terminationReason == .uncaughtSignal && process.terminationStatus == SIGTERM) {
+                        self?.lastError = NativeHelper.failureMessage(config, process: process,
+                            log: logURL, since: logOffset)
                     }
                     await self?.refresh()
                 }
@@ -167,13 +196,33 @@ final class InstanceStore: ObservableObject {
             preferences.set(Array(incompleteProfiles), forKey: "runtimeIncompleteProfiles")
             selectedId = config.instanceId
             lastError = nil
+            // Publishing the control endpoint precedes loading a model. Wait
+            // for that acknowledgment so an immediate exit cannot look like a
+            // successful start or lose its error behind the initial refresh.
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !records().contains(where: {
+                $0.instanceId == config.instanceId && $0.pid == Int(process.processIdentifier)
+            }) {
+                guard process.isRunning else {
+                    throw RuntimeFailure.message(NativeHelper.failureMessage(config, process: process,
+                        log: logURL, since: logOffset))
+                }
+                guard ContinuousClock.now < deadline else {
+                    throw RuntimeFailure.message("Le runtime de « \(config.name) » n’a pas encore répondu. Consulte son journal avant de relancer.")
+                }
+                try await Task.sleep(for: .milliseconds(50))
+            }
             await refresh()
             return true
-        } catch { lastError = error.localizedDescription; return false }
+        } catch {
+            lastError = error.localizedDescription
+            await refresh()
+            return false
+        }
     }
 
     func save(_ config: RuntimeConfiguration, for target: InstanceRow, restart: Bool) async throws {
-        guard config.instanceId == target.id, !restartingIDs.contains(target.id) else {
+        guard config.instanceId == target.id, !isChanging(target.id) else {
             throw RuntimeFailure.message("Cette instance est déjà en cours de modification.")
         }
         try validate(config)
@@ -210,7 +259,7 @@ final class InstanceStore: ObservableObject {
             // The owner removes its record just before releasing its file lock.
             try await Task.sleep(for: .milliseconds(100))
             if let child = children[target.id], !child.isRunning { children.removeValue(forKey: target.id) }
-            guard await start(config) else {
+            guard await startRuntime(config) else {
                 throw RuntimeFailure.message(lastError ?? "Impossible de redémarrer cette instance.")
             }
         } else {
@@ -229,7 +278,8 @@ final class InstanceStore: ObservableObject {
     }
 
     private func records() -> [RuntimeRecord] {
-        Registry.records(in: runtimeHome.appendingPathComponent("instances"))
+        let directory = runtimeHome.appendingPathComponent("instances")
+        return Registry.records(in: directory).filter { !Registry.removeOrphan($0, in: directory) }
     }
 
     private func validate(_ config: RuntimeConfiguration) throws {
@@ -262,51 +312,78 @@ final class InstanceStore: ObservableObject {
         profiles = next
     }
 
-    private func launchNative(_ config: RuntimeConfiguration) throws -> Process {
-        let process = Process()
-        process.executableURL = try NativeHelper.executableURL()
-        let input = Pipe()
-        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-        process.standardInput = input
-        let logs = runtimeHome.appendingPathComponent("logs")
-        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-        let logURL = logs.appendingPathComponent("instance-\(config.instanceId).log")
-        if !FileManager.default.fileExists(atPath: logURL.path) {
-            guard FileManager.default.createFile(atPath: logURL.path, contents: nil,
-                attributes: [.posixPermissions: 0o600]) else {
-                throw RuntimeFailure.message("Impossible de créer le journal de l’instance.")
-            }
-        }
-        let output = try FileHandle(forWritingTo: logURL)
-        defer { try? output.close() }
-        try output.seekToEnd()
-        process.standardOutput = output
-        process.standardError = output
-        try process.run()
-        do {
-            try input.fileHandleForWriting.write(contentsOf: JSONEncoder().encode(config))
-            try input.fileHandleForWriting.close()
-        } catch {
-            try? input.fileHandleForWriting.close()
-            if process.isRunning { process.terminate() }
-            throw error
-        }
-        return process
+    func forget(_ row: InstanceRow) {
+        guard row.record == nil, !isChanging(row.id),
+              !records().contains(where: { $0.instanceId == row.id }) else { return }
+        try? removeProfile(row.id)
     }
 
-    func forget(_ row: InstanceRow) {
-        guard row.record == nil else { return }
-        profiles.removeAll { $0.instanceId == row.id }
-        pendingRuns.removeValue(forKey: row.id)
+    private func removeProfile(_ id: String) throws {
+        let next = profiles.filter { $0.instanceId != id }
+        preferences.set(try JSONEncoder().encode(next), forKey: "runtimeProfiles")
+        profiles = next
+        pendingRuns.removeValue(forKey: id)
         preferences.set(pendingRuns, forKey: "runtimePendingEdits")
-        incompleteProfiles.remove(row.id)
+        incompleteProfiles.remove(id)
         preferences.set(Array(incompleteProfiles), forKey: "runtimeIncompleteProfiles")
-        if let data = try? JSONEncoder().encode(profiles) {
-            preferences.set(data, forKey: "runtimeProfiles")
-        }
-        rows.removeAll { $0.id == row.id }
-        if selectedId == row.id { selectedId = rows.first?.id ?? "" }
+        rows.removeAll { $0.id == id }
+        if selectedId == id { selectedId = rows.first?.id ?? "" }
+        if editing?.configuration.instanceId == id { editing = nil }
         widgetPublisher?.publish(rows)
+    }
+
+    @discardableResult
+    func delete(_ target: InstanceRow) async -> Bool {
+        guard !isChanging(target.id) else {
+            lastError = "Une opération est déjà en cours sur cette instance."
+            return false
+        }
+        deletingIDs.insert(target.id)
+        defer { deletingIDs.remove(target.id) }
+        do {
+            let current = records().first { $0.instanceId == target.id }
+            if let current {
+                guard current.runId == target.record?.runId else {
+                    throw RuntimeFailure.message("L’instance a redémarré depuis la confirmation. Sa nouvelle exécution a été conservée.")
+                }
+                do { try await client.stop(current) }
+                catch {
+                    throw RuntimeFailure.message("Impossible d’arrêter « \(target.name) » : \(error.localizedDescription) Sa configuration a été conservée.")
+                }
+                let deadline = ContinuousClock.now + .seconds(30)
+                while let owner = records().first(where: { $0.instanceId == target.id }) {
+                    guard owner.runId == current.runId else {
+                        throw RuntimeFailure.message("Une autre exécution a démarré. Elle n’a pas été supprimée.")
+                    }
+                    guard ContinuousClock.now < deadline else {
+                        throw RuntimeFailure.message("L’arrêt prend trop de temps. L’instance a été conservée ; réessaie après son arrêt.")
+                    }
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+            }
+            // Keep a concurrent CLI start from racing the final profile removal.
+            try Registry.withIdleInstance(target.id, in: runtimeHome.appendingPathComponent("instances")) {
+                guard !Registry.records(in: runtimeHome.appendingPathComponent("instances"))
+                    .contains(where: { $0.instanceId == target.id }) else {
+                    throw RuntimeFailure.message("Une autre exécution a démarré. Elle n’a pas été supprimée.")
+                }
+                try removeProfile(target.id)
+            }
+            lastError = nil
+            await refresh()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            await refresh()
+            return false
+        }
+    }
+
+    private func preserveConfiguration(_ row: InstanceRow) throws {
+        if row.profile == nil, row.snapshot?.managed == true,
+           let configuration = row.snapshot?.configuration?.value {
+            try persist(configuration)
+        }
     }
 
     func handleWidget(_ command: WidgetCommand) async throws {
@@ -321,6 +398,10 @@ final class InstanceStore: ObservableObject {
         }
         selectedId = id
         widgetOpenRequest = UUID()
+        if case .refresh = command { return }
+        guard !isChanging(id) else {
+            throw RuntimeFailure.message("Une opération est déjà en cours sur cette instance.")
+        }
         switch command {
         case .start:
             guard row.record == nil, let config = row.profile else {
@@ -333,12 +414,7 @@ final class InstanceStore: ObservableObject {
             guard RuntimeRecord.validId(run), let record = row.record, record.runId == run else {
                 throw RuntimeFailure.message("L’instance a redémarré depuis l’affichage du widget. Actualise-le avant de l’arrêter.")
             }
-            // Keep the full original options of a managed CLI instance so
-            // this same widget can start it again after its record disappears.
-            if row.profile == nil, row.snapshot?.managed == true,
-               let configuration = row.snapshot?.configuration?.value {
-                try persist(configuration)
-            }
+            try preserveConfiguration(row)
             try await client.stop(record)
             await refresh()
         case .refresh: break
