@@ -2,11 +2,12 @@ import SwiftUI
 import AppKit
 
 enum DesktopSection: String, CaseIterable, Identifiable {
-    case instances, downloaded, catalog, settings
+    case instances, chat, downloaded, catalog, settings
     var id: String { rawValue }
     var title: String {
         switch self {
         case .instances: return "Instances"
+        case .chat: return "Chat"
         case .downloaded: return "Modèles téléchargés"
         case .catalog: return "Catalogue"
         case .settings: return "Réglages"
@@ -15,6 +16,7 @@ enum DesktopSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .instances: return "cpu"
+        case .chat: return "bubble.left.and.bubble.right"
         case .downloaded: return "internaldrive"
         case .catalog: return "square.grid.2x2"
         case .settings: return "slider.horizontal.3"
@@ -30,6 +32,7 @@ struct DesktopView: View {
 
     @EnvironmentObject private var store: InstanceStore
     @EnvironmentObject private var library: ModelLibrary
+    @EnvironmentObject private var chats: ChatStore
     @State private var section: DesktopSection? = .instances
     @State private var launchRequest: LaunchRequest?
 
@@ -37,7 +40,7 @@ struct DesktopView: View {
         NavigationSplitView {
             List(selection: $section) {
                 Section("Kapitsa") {
-                    ForEach([DesktopSection.instances, .downloaded, .catalog], id: \.self) { item in
+                    ForEach([DesktopSection.instances, .chat, .downloaded, .catalog], id: \.self) { item in
                         Button {
                             section = item
                         } label: {
@@ -102,6 +105,10 @@ struct DesktopView: View {
         .frame(minWidth: 860, minHeight: 600)
         .background(DesktopWindowMarker())
         .task { await library.refresh() }
+        .onChange(of: chats.openRequest) { _, _ in section = .chat; chats.openingChat = false }
+        .onAppear {
+            if chats.openingChat { section = .chat; chats.openingChat = false }
+        }
         .sheet(item: $launchRequest) { request in
             NewInstanceForm(creating: Binding(
                 get: { launchRequest != nil },
@@ -113,6 +120,7 @@ struct DesktopView: View {
     @ViewBuilder private var content: some View {
         switch section ?? .instances {
         case .instances: InstancesWorkspace()
+        case .chat: ChatWorkspace()
         case .downloaded:
             DownloadedModelsView { model in launchRequest = LaunchRequest(model: model) }
         case .catalog:
@@ -191,6 +199,7 @@ struct InstancesWorkspace: View {
 
 struct InstanceDetailView: View {
     @EnvironmentObject private var store: InstanceStore
+    @EnvironmentObject private var chats: ChatStore
     let row: InstanceRow
     @State private var stopTarget: InstanceRow?
 
@@ -233,7 +242,7 @@ struct InstanceDetailView: View {
                     }.frame(maxWidth: .infinity)
                     HStack {
                         Button("Ouvrir le chat", systemImage: "bubble.left") {
-                            if let url = URL(string: state.apiUrl) { NSWorkspace.shared.open(url) }
+                            chats.open(row.id)
                         }.disabled(state.state != "ready")
                         Button("Copier l’URL", systemImage: "doc.on.doc") {
                             NSPasteboard.general.clearContents()
