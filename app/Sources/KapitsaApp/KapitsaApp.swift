@@ -5,14 +5,34 @@ import AppKit
 struct KapitsaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var store = InstanceStore()
+    @StateObject private var library = ModelLibrary()
+    @StateObject private var settings = AppSettings()
 
     var body: some Scene {
+        Window("Kapitsa", id: "desktop") {
+            DesktopView()
+                .environmentObject(store)
+                .environmentObject(library)
+                .environmentObject(settings)
+                .onAppear { delegate.cancelDownloads = { library.cancelDownload() } }
+        }
+        .defaultSize(width: 1120, height: 760)
+        .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                OpenDesktopCommand()
+            }
+        }
         MenuBarExtra {
-            InstanceMenu().environmentObject(store)
+            InstanceMenu().environmentObject(store).environmentObject(settings)
         } label: {
             RuntimeBarLabel(store: store)
         }
         .menuBarExtraStyle(.window)
+        Settings {
+            PreferencesView().environmentObject(settings).environmentObject(library)
+                .frame(width: 620, height: 580)
+        }
     }
 }
 
@@ -25,15 +45,34 @@ struct RuntimeBarLabel: View {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    var cancelDownloads: (() -> Void)?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        cancelDownloads?()
+    }
+}
+
+struct OpenDesktopCommand: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("Ouvrir Kapitsa") {
+            openWindow(id: "desktop")
+            DesktopWindowFocus.activate()
+        }.keyboardShortcut("0", modifiers: .command)
     }
 }
 
 struct InstanceMenu: View {
     @EnvironmentObject private var store: InstanceStore
+    @Environment(\.openWindow) private var openWindow
     @State private var creating = false
-    @State private var confirmStop = false
     @State private var stopTarget: InstanceRow?
 
     var body: some View {
@@ -41,11 +80,32 @@ struct InstanceMenu: View {
             HStack {
                 Text("Kapitsa").font(.headline)
                 Spacer()
+                Button("Ouvrir l’app", systemImage: "macwindow") {
+                    openWindow(id: "desktop")
+                    DesktopWindowFocus.activate()
+                }.labelStyle(.iconOnly).help("Ouvrir la fenêtre Kapitsa")
                 Text("\(store.rows.filter { $0.snapshot != nil }.count) instance(s)")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let error = store.lastError {
                 Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+            }
+            if let target = stopTarget {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Arrêter « \(target.name) » ?").font(.headline)
+                    Text("Les requêtes en cours seront interrompues.").font(.caption)
+                    HStack {
+                        Button("Annuler") { stopTarget = nil }
+                        Spacer()
+                        Button("Confirmer l’arrêt", role: .destructive) {
+                            stopTarget = nil
+                            Task { await store.stop(target) }
+                        }
+                    }
+                }
+                .padding(12)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                Divider()
             }
             if !store.rows.isEmpty {
                 Picker("Instance", selection: $store.selectedId) {
@@ -75,15 +135,6 @@ struct InstanceMenu: View {
         }
         .padding(16)
         .frame(width: 440)
-        .alert("Arrêter cette instance ?", isPresented: $confirmStop) {
-            Button("Annuler", role: .cancel) { stopTarget = nil }
-            Button("Arrêter", role: .destructive) {
-                if let row = stopTarget { Task { await store.stop(row) } }
-                stopTarget = nil
-            }
-        } message: {
-            Text("Les requêtes en cours de « \(stopTarget?.name ?? "") » seront interrompues.")
-        }
     }
 
     @ViewBuilder
@@ -146,7 +197,6 @@ struct InstanceMenu: View {
                 Spacer()
                 Button("Arrêter", role: .destructive) {
                     stopTarget = row
-                    confirmStop = true
                 }
                     .disabled(state.state == "stopping")
             }
@@ -194,7 +244,9 @@ struct InstanceMenu: View {
 
 struct NewInstanceForm: View {
     @EnvironmentObject private var store: InstanceStore
+    @EnvironmentObject private var settings: AppSettings
     @Binding var creating: Bool
+    var initialModel = ""
     @State private var name = ""
     @State private var model = ""
     @State private var context = ""
@@ -202,6 +254,7 @@ struct NewInstanceForm: View {
     @State private var slots = 0
     @State private var error: String?
     @State private var launching = false
+    @State private var advanced = LaunchDefaults()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -224,6 +277,9 @@ struct NewInstanceForm: View {
                 Text("Automatique").tag(0)
                 ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
             }
+            DisclosureGroup("Options du moteur") {
+                EngineOptionsFields(value: $advanced)
+            }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button("Annuler") { creating = false }
@@ -233,15 +289,8 @@ struct NewInstanceForm: View {
                         guard let number = Int(port), (1...65535).contains(number) else {
                             throw RuntimeFailure.message("Le port doit être compris entre 1 et 65535.")
                         }
-                        let config = RuntimeConfiguration(instanceId: UUID().uuidString.lowercased(),
-                            name: name.trimmingCharacters(in: .whitespaces),
-                            model: (model as NSString).expandingTildeInPath,
-                            port: number, context: try RuntimeConfiguration.contextTokens(context),
-                            slots: slots == 0 ? nil : slots)
-                        guard !config.name.isEmpty, config.name.utf8.count <= 128,
-                              !config.model.isEmpty else {
-                            throw RuntimeFailure.message("Renseigne un nom et un modèle.")
-                        }
+                        let config = try advanced.configuration(name: name, model: model,
+                            port: number, context: context, slots: slots)
                         launching = true
                         Task {
                             await store.start(config)
@@ -253,8 +302,11 @@ struct NewInstanceForm: View {
             }
         }
         .onAppear {
-            let used = Set(store.rows.compactMap { $0.snapshot.flatMap { URLComponents(string: $0.apiUrl)?.port } })
-            port = String((8000...65535).first { !used.contains($0) } ?? 8000)
+            advanced = settings.defaults
+            model = initialModel.isEmpty ? settings.defaults.model : initialModel
+            context = settings.defaults.context
+            slots = settings.defaults.slots
+            port = String(settings.availablePort(in: store.rows))
         }
     }
 }
