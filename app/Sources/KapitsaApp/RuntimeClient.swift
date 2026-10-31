@@ -137,6 +137,53 @@ enum Registry {
             return record
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+
+    // A PID is only informational: it can be reused, and an unreachable
+    // endpoint can still belong to a running engine. Only its file lock proves
+    // that an execution has ended. Never unlink the lock file itself.
+    static func withIdleInstance<T>(_ id: String, in directory: URL,
+                                    _ operation: () throws -> T) throws -> T {
+        guard RuntimeRecord.validId(id) else { throw RuntimeFailure.message("Instance invalide.") }
+        if !FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+        }
+        guard privatePath(directory, directory: true) else {
+            throw RuntimeFailure.message("Le registre d’instances n’est pas accessible.")
+        }
+        let path = directory.appendingPathComponent(id + ".lock").path
+        let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { throw RuntimeFailure.message("Le verrou de l’instance n’est pas accessible.") }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_uid == getuid(), info.st_mode & 0o077 == 0,
+              info.st_mode & S_IFMT == S_IFREG else {
+            throw RuntimeFailure.message("Le verrou de l’instance est invalide.")
+        }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            throw RuntimeFailure.message("Cette instance est encore active. Elle doit être arrêtée avant sa suppression.")
+        }
+        return try operation()
+    }
+
+    @discardableResult
+    static func removeOrphan(_ record: RuntimeRecord, in directory: URL) -> Bool {
+        // A missing/invalid lock is not evidence that a known owner has ended.
+        let lock = directory.appendingPathComponent(record.instanceId + ".lock")
+        guard record.valid, privatePath(lock, directory: false) else { return false }
+        return (try? withIdleInstance(record.instanceId, in: directory) {
+            let file = directory.appendingPathComponent(record.instanceId + ".json")
+            guard privatePath(file, directory: false),
+                  let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 16_384,
+                  let data = try? Data(contentsOf: file), data.count <= 16_384,
+                  let current = try? RuntimeClient.decode(RuntimeRecord.self, from: data),
+                  current == record else { return false }
+            // The lock excludes native starts; the run comparison excludes an
+            // outdated observer deleting a replacement execution's record.
+            try FileManager.default.removeItem(at: file)
+            return true
+        }) ?? false
+    }
 }
 
 private final class LocalOnlySession: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
@@ -260,4 +307,66 @@ enum NativeHelper {
         for url in [bundled, development] where FileManager.default.isExecutableFile(atPath: url.path) { return url }
         throw RuntimeFailure.message("Le runtime Kapitsa est absent. Reconstruis le bundle de l’app.")
     }
+
+    #if !KAPITSA_WIDGET
+    static func launch(_ config: RuntimeConfiguration, home: URL, arguments: [String] = []) throws -> Process {
+        guard RuntimeRecord.validId(config.instanceId) else { throw RuntimeFailure.message("Instance invalide.") }
+        let process = Process()
+        process.executableURL = try executableURL()
+        process.arguments = arguments
+        let input = Pipe()
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        process.standardInput = input
+        let logs = home.appendingPathComponent("logs")
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let logURL = logs.appendingPathComponent("instance-\(config.instanceId).log")
+        let fd = open(logURL.path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { throw RuntimeFailure.message("Impossible d’ouvrir le journal de l’instance.") }
+        let output = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        defer { try? output.close() }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_uid == getuid(), info.st_mode & S_IFMT == S_IFREG,
+              info.st_mode & 0o077 == 0 else {
+            throw RuntimeFailure.message("Le journal de l’instance doit être un fichier privé.")
+        }
+        process.standardOutput = output
+        process.standardError = output
+        // Keep the runtime and its observer in the same registry even when
+        // KAPITSA_HOME has been supplied by an embedding frontend.
+        process.environment = ProcessInfo.processInfo.environment.merging(
+            ["KAPITSA_HOME": home.path], uniquingKeysWith: { _, value in value })
+        try process.run()
+        do {
+            try input.fileHandleForWriting.write(contentsOf: JSONEncoder().encode(config))
+            try input.fileHandleForWriting.close()
+        } catch {
+            try? input.fileHandleForWriting.close()
+            if process.isRunning { process.terminate() }
+            throw error
+        }
+        return process
+    }
+
+    static func failureMessage(_ config: RuntimeConfiguration, process: Process,
+                               log: URL, since offset: Int) -> String {
+        let cause = process.terminationReason == .uncaughtSignal ?
+            "signal \(process.terminationStatus)" : "code \(process.terminationStatus)"
+        var message = "L’instance « \(config.name) » s’est arrêtée (\(cause))."
+        if Registry.privatePath(log, directory: false), let input = try? FileHandle(forReadingFrom: log) {
+            defer { try? input.close() }
+            let end = (try? input.seekToEnd()) ?? 0
+            try? input.seek(toOffset: max(UInt64(max(0, offset)), end > 16_384 ? end - 16_384 : 0))
+            if let data = try? input.read(upToCount: 16_384) {
+                // Startup diagnostics only, bounded to this launch; never use
+                // engine output as the state or activity protocol.
+                let lines = String(decoding: data, as: UTF8.self).components(separatedBy: .newlines)
+                if let reason = lines.last(where: { $0.hasPrefix("kapitsa-runtime:") || $0.hasPrefix("kapitsa:") }) {
+                    message += "\n" + String(reason.prefix(600))
+                }
+            }
+        }
+        return message + "\nConsulte le journal de l’instance pour les détails."
+    }
+    #endif
 }
