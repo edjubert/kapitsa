@@ -80,6 +80,7 @@ struct RuntimeSnapshot: Decodable, Sendable {
     let state: String
     let apiUrl: String
     let model: String
+    let modelDir: String?
     let context: Int?
     let slots: Int?
     let quant: String?
@@ -93,7 +94,7 @@ struct RuntimeSnapshot: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
-        case instanceId, runId, name, state, apiUrl, model, context, slots, quant
+        case instanceId, runId, name, state, apiUrl, model, modelDir, context, slots, quant
         case memoryUsedBytes, memoryBudgetBytes, requests, lastRequest, cursor, events, reset
     }
 }
@@ -195,12 +196,21 @@ struct RuntimeConfiguration: Codable {
     let port: Int
     let context: Int?
     let slots: Int?
+    var memBudgetGb: Double? = nil
+    var spec: Int? = nil
+    var dflash: String? = nil
+    var diskCache: String? = nil
+    var prefillChunk: Int? = nil
     var protocolVersion = 1
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case instanceId = "instance_id"
         case name, model, port, context, slots
+        case memBudgetGb = "mem_budget_gb"
+        case spec, dflash
+        case diskCache = "disk_cache"
+        case prefillChunk = "prefill_chunk"
     }
 
     static func contextTokens(_ text: String) throws -> Int? {
@@ -213,5 +223,16 @@ struct RuntimeConfiguration: Codable {
             throw RuntimeFailure.message("Le contexte doit être un nombre de tokens, par exemple 90k.")
         }
         return count * unit
+    }
+}
+
+enum NativeHelper {
+    static func executableURL() throws -> URL {
+        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/kapitsa-runtime")
+        let development = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("build/kapitsa-runtime")
+        for url in [bundled, development] where FileManager.default.isExecutableFile(atPath: url.path) { return url }
+        throw RuntimeFailure.message("Le runtime Kapitsa est absent. Reconstruis le bundle de l’app.")
     }
 }
