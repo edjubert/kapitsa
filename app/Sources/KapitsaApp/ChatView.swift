@@ -9,8 +9,8 @@ struct ChatWorkspace: View {
     var body: some View {
         VStack(spacing: 0) {
             if store.rows.isEmpty {
-                ContentUnavailableView("Aucune instance", systemImage: "bubble.left.and.bubble.right",
-                    description: Text("Démarre une instance dans la section Instances pour commencer une conversation."))
+                KapitsaEmptyState(title: "Aucune instance",
+                    description: "Démarre une instance dans la section Instances pour commencer une conversation.")
             } else {
                 HStack {
                     Picker("Instance", selection: $chats.selectedInstanceID) {
@@ -123,10 +123,10 @@ private struct ChatConversation: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
                         if session.messages.isEmpty {
-                            ContentUnavailableView("Parlons avec \(row.name)", systemImage: "bubble.left.and.bubble.right",
-                                description: Text(session.connected
+                            KapitsaEmptyState(title: "Parlons avec \(row.name)",
+                                description: session.connected
                                     ? "Écris un message ou ajoute des images. La conversation reste sur ce Mac."
-                                    : "Cette instance doit être prête pour recevoir des messages."))
+                                    : "Cette instance doit être prête pour recevoir des messages.")
                                 .frame(minHeight: max(160, viewport.size.height - 48))
                         }
                         ForEach(session.messages) { message in
@@ -248,9 +248,13 @@ private struct ChatMessageView: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label(message.role == "user" ? "Vous" : "Kapitsa",
-                      systemImage: message.role == "user" ? "person.crop.circle" : "sparkles")
-                    .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                if message.role == "user" {
+                    Label("Vous", systemImage: "person.crop.circle")
+                        .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                } else {
+                    Label { Text("Kapitsa") } icon: { KapitsaMark() }
+                        .font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                }
                 Spacer()
                 if !message.content.isEmpty {
                     Button("Copier le message", systemImage: "doc.on.doc") {

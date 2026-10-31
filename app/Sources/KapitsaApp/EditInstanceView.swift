@@ -38,7 +38,10 @@ struct EditInstanceView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Modifier l’instance").font(.title2.weight(.semibold))
+                HStack(spacing: 12) {
+                    KapitsaMark()
+                    Text("Modifier l’instance").font(.title2.weight(.semibold))
+                }
                 Text(request.row.record == nil || !request.row.canRestart
                      ? "Les changements seront utilisés au prochain lancement."
                      : "Enregistre les changements pour plus tard, ou redémarre l’instance pour les appliquer.")

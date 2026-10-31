@@ -25,6 +25,7 @@ struct KapitsaApp: App {
     var body: some Scene {
         Window("Kapitsa", id: "desktop") {
             DesktopView()
+                .tint(KapitsaBrand.green)
                 .environmentObject(store)
                 .environmentObject(library)
                 .environmentObject(settings)
@@ -47,15 +48,25 @@ struct KapitsaApp: App {
             CommandGroup(replacing: .newItem) {
                 OpenDesktopCommand()
             }
+            CommandGroup(replacing: .appInfo) {
+                Button("À propos de Kapitsa") {
+                    NSApplication.shared.orderFrontStandardAboutPanel(options: [
+                        .applicationIcon: KapitsaBrand.icon,
+                        .credits: NSAttributedString(string: "Kapitsa, un projet de Nace AI.")
+                    ])
+                }
+            }
         }
         MenuBarExtra {
             InstanceMenu().environmentObject(store).environmentObject(settings).environmentObject(chats)
+                .tint(KapitsaBrand.green)
         } label: {
             RuntimeBarLabel(store: store)
         }
         .menuBarExtraStyle(.window)
         Settings {
             PreferencesView().environmentObject(settings).environmentObject(library)
+                .tint(KapitsaBrand.green)
                 .frame(width: 620, height: 580)
         }
     }
@@ -63,9 +74,14 @@ struct KapitsaApp: App {
 
 struct RuntimeBarLabel: View {
     @ObservedObject var store: InstanceStore
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        Label(store.activeRequests > 0 ? "Kapitsa · \(store.activeRequests)" : "Kapitsa",
-              systemImage: "cpu")
+        Label {
+            Text(store.activeRequests > 0 ? "Kapitsa · \(store.activeRequests)" : "Kapitsa")
+        } icon: {
+            Image(nsImage: KapitsaBrand.mark(for: scheme))
+                .resizable().scaledToFit().frame(width: 24, height: 18)
+        }
     }
 }
 
@@ -104,7 +120,7 @@ struct InstanceMenu: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Kapitsa").font(.headline)
+                KapitsaWordmark(width: 144).padding(.vertical, 12)
                 Spacer()
                 Button("Ouvrir l’app", systemImage: "macwindow") {
                     openWindow(id: "desktop")
@@ -306,7 +322,10 @@ struct NewInstanceForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Nouvelle instance").font(.subheadline)
+            HStack(spacing: 12) {
+                KapitsaMark()
+                Text("Nouvelle instance").font(.headline)
+            }.padding(.vertical, 12)
             TextField("Nom de l’instance", text: $name)
             HStack {
                 TextField("Modèle : 27b, 4b, ou dossier", text: $model)

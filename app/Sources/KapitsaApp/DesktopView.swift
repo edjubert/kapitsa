@@ -39,7 +39,7 @@ struct DesktopView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $section) {
-                Section("Kapitsa") {
+                Section("Espace de travail") {
                     ForEach([DesktopSection.instances, .chat, .downloaded, .catalog], id: \.self) { item in
                         Button {
                             section = item
@@ -62,6 +62,11 @@ struct DesktopView: View {
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 280)
+            .safeAreaInset(edge: .top) {
+                KapitsaWordmark(width: 168)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20).padding(.vertical, 16)
+            }
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 5) {
                     Label("\(store.rows.filter { $0.snapshot != nil }.count) instance(s) active(s)",
@@ -181,8 +186,8 @@ struct InstancesWorkspace: View {
     @EnvironmentObject private var store: InstanceStore
     var body: some View {
         if store.rows.isEmpty {
-            ContentUnavailableView("Aucune instance", systemImage: "cpu",
-                description: Text("Démarre un modèle avec le bouton +. Les instances lancées depuis la CLI apparaissent aussi ici."))
+            KapitsaEmptyState(title: "Aucune instance",
+                description: "Démarre un modèle avec le bouton +. Les instances lancées depuis la CLI apparaissent aussi ici.")
         } else {
             HSplitView {
                 List(selection: $store.selectedId) {
@@ -211,7 +216,7 @@ struct InstancesWorkspace: View {
                     InstanceDetailView(row: row)
                         .frame(minWidth: 390, maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ContentUnavailableView("Choisis une instance", systemImage: "cpu")
+                    KapitsaEmptyState(title: "Choisis une instance")
                 }
             }
         }

@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Kapitsa</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111'/%3E%3Cpath d='M10 7v18M22 7l-9 9 9 9' stroke='%23fff' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="__kapitsa-icon__">
 <style>
-:root{color-scheme:light dark;--bg:#fff;--fg:#1a1a1a;--muted:#6b6b6b;--line:#e3e3e3;--soft:#f4f4f4;--accent:#1f6feb;--err:#b42318;--code:#f6f6f6}
-@media (prefers-color-scheme:dark){:root{--bg:#1b1b1b;--fg:#ececec;--muted:#a3a3a3;--line:#343434;--soft:#262626;--accent:#6ea8fe;--err:#ff8a80;--code:#232323}}
+:root{color-scheme:light dark;--bg:#fff;--fg:#0b0f0d;--muted:#56615b;--line:#dfe7e1;--soft:#f2f6f3;--brand:#3fb55a;--accent:#237d38;--err:#b42318;--code:#f2f6f3}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0f0d;--fg:#e8eee9;--muted:#8a9690;--line:#29372e;--soft:#17241c;--accent:#9df0b0;--err:#ff8a80;--code:#142018}}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column}
@@ -16,6 +16,9 @@ button{cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line)}
 header h1{margin:0;font-size:16px;font-weight:650;letter-spacing:-.01em}
+.wordmark{display:block;width:144px;height:26px;object-fit:contain;margin:8px 12px 8px 0}
+.brand-mark{display:block;width:80px;height:58px;object-fit:contain;margin:0 auto 29px}
+input[type=checkbox]{accent-color:var(--accent)}
 #model{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .model-wrap{display:flex;align-items:center;gap:8px}
 .model-select{color:var(--fg);background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:13px;font-weight:500;max-width:280px;text-overflow:ellipsis;cursor:pointer;outline:none}
@@ -58,7 +61,7 @@ footer{padding:8px 16px 14px}
 #form:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 textarea{flex:1;border:0;outline:0;resize:none;background:transparent;max-height:40vh;padding:6px 0;line-height:1.5}
 textarea:focus-visible{outline:0}
-#send,#stop{border:0;border-radius:10px;padding:7px 14px;background:var(--fg);color:var(--bg);font-weight:600}
+#send,#stop{border:0;border-radius:10px;padding:7px 14px;background:var(--brand);color:#0b0f0d;font-weight:600}
 #send:disabled{opacity:.35;cursor:default}
 #stop{background:var(--soft);color:var(--fg);border:1px solid var(--line)}
 .hint{max-width:780px;margin:6px auto 0;color:var(--muted);font-size:12px;text-align:center}
@@ -80,11 +83,20 @@ dialog .btn{justify-self:end}
 .user{flex-direction:column;align-items:flex-end}
 .user .imgs{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-bottom:6px}
 .user .imgs img{max-height:160px;max-width:240px}
+@media(max-width:640px){
+  header{flex-wrap:wrap}
+  .wordmark{width:120px;height:22px;margin-right:0}
+  .model-wrap{order:3;flex-basis:100%;min-width:0}
+  .model-select{max-width:100%;flex:1;min-width:0}
+}
 </style>
 </head>
 <body>
 <header>
-  <h1>Kapitsa</h1>
+  <h1><picture>
+    <source media="(prefers-color-scheme:dark)" srcset="__kapitsa-logo-dark__">
+    <img class="wordmark" src="__kapitsa-logo-light__" alt="Kapitsa" width="144" height="26">
+  </picture></h1>
   <div class="model-wrap" title="Switch active model">
     <select id="model-select" class="model-select" aria-label="Select Model" disabled>
       <option value="" disabled selected>connecting…</option>
@@ -124,6 +136,7 @@ dialog .btn{justify-self:end}
 const TIMING = "__TIMING__";  // kapitsa serve --timing: ttft, prefill or both; the server fills it in
 const $ = (id) => document.getElementById(id);
 const log = $("log"), scroller = $("scroll"), input = $("input"), send = $("send"), stop = $("stop");
+const brandMark = '<picture><source media="(prefers-color-scheme:dark)" srcset="__kapitsa-mark__"><img class="brand-mark" src="__kapitsa-mark-light__" alt="" width="80" height="58"></picture>';
 const store = { get(k, d) { try { const v = localStorage.getItem("kapitsa." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
                 set(k, v) { try { localStorage.setItem("kapitsa." + k, JSON.stringify(v)); } catch {} } };
 let messages = store.get("chat", []);   // {role, content, images?, reasoning?, stats?}
@@ -268,7 +281,7 @@ function addMessage(m) {
 }
 function renderAll() {
   log.textContent = "";
-  if (!messages.length) log.innerHTML = '<div class="empty"><b>What can I help with?</b>Ask anything. Kapitsa runs the model on this Mac.</div>';
+  if (!messages.length) log.innerHTML = '<div class="empty">' + brandMark + '<b>What can I help with?</b>Ask anything. Kapitsa runs the model on this Mac.</div>';
   for (const m of messages) addMessage(m);
   toBottom();
 }

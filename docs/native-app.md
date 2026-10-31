@@ -24,6 +24,14 @@ The fork's CLI updater and installer use `edjubert/kapitsa` releases;
 until this fork publishes releases, build from this checkout. Installing
 upstream's Homebrew package does not install these changes.
 
+The app, menu bar, widgets and web chat use the official
+[Kapitsa press kit](assets/brand/README.md). Light and dark appearances select
+their matching mark/wordmark; the green accent accompanies the native controls.
+The macOS icon packages the existing square artwork with the platform's padded,
+rounded silhouette. App and widget bundles include the same source PNGs, while
+the self-contained web chat embeds the SVG masters at build time without
+additional requests. Status and destructive-action colors retain their meaning.
+
 ## Desktop and Notification Center widget
 
 Open Kapitsa once, then use macOS **Edit Widgets**, search for **Kapitsa**, and

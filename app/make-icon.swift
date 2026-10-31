@@ -1,7 +1,9 @@
-// Development app icon, rendered from Apple's vector CPU symbol.
+// Package the official press-kit icon in macOS's padded, rounded silhouette.
 import AppKit
 
 let destination = URL(fileURLWithPath: CommandLine.arguments[1])
+let source = URL(fileURLWithPath: CommandLine.arguments[2])
+guard let image = NSImage(contentsOf: source) else { fatalError("Cannot read the Kapitsa app icon") }
 let iconset = destination.deletingLastPathComponent().appendingPathComponent("Kapitsa.iconset")
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 let sizes = [16, 32, 128, 256, 512]
@@ -16,11 +18,9 @@ for size in sizes {
         let ratio = CGFloat(pixels) / 1024
         let bounds = NSRect(x: 100 * ratio, y: 100 * ratio, width: 824 * ratio, height: 824 * ratio)
         let rounded = NSBezierPath(roundedRect: bounds, xRadius: 185 * ratio, yRadius: 185 * ratio)
-        NSGradient(starting: NSColor(red: 0.18, green: 0.65, blue: 0.80, alpha: 1),
-                   ending: NSColor(red: 0.15, green: 0.32, blue: 0.72, alpha: 1))!.draw(in: rounded, angle: -75)
-        let symbol = NSImage(systemSymbolName: "cpu", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.white]))
-        symbol?.draw(in: NSRect(x: 280 * ratio, y: 280 * ratio, width: 464 * ratio, height: 464 * ratio))
+        rounded.addClip()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: bounds)
         NSGraphicsContext.restoreGraphicsState()
         let suffix = scale == 2 ? "@2x" : ""
         try bitmap.representation(using: .png, properties: [:])!

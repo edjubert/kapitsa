@@ -11,6 +11,9 @@ from pathlib import Path
 APP = Path(__file__).resolve().parent
 ROOT = APP.parent
 BUILD = ROOT / "build/native-app"
+BRAND = ROOT / "docs/assets/brand"
+BRAND_ASSETS = ["kapitsa-icon-1024.png", "kapitsa-mark-1024.png", "kapitsa-mark-light-1024.png",
+                "kapitsa-logo-dark-1024.png", "kapitsa-logo-light-1024.png"]
 
 
 def run(*args, **kwargs):
@@ -153,7 +156,14 @@ def main():
         run("codesign", "--force", "--sign", identity, str(contents / "MacOS" / name))
     resources = contents / "Resources"
     resources.mkdir(exist_ok=True)
-    run("swift", str(APP / "make-icon.swift"), str(resources / "Kapitsa.icns"))
+    run("swift", str(APP / "make-icon.swift"), str(resources / "Kapitsa.icns"),
+        str(BRAND / "kapitsa-icon-1024.png"))
+    for target in [bundle, extension]:
+        brand_resources = target / "Contents/Resources/Brand"
+        brand_resources.mkdir(parents=True, exist_ok=True)
+        for name in BRAND_ASSETS:
+            shutil.copy2(BRAND / name, brand_resources / name)
+    shutil.copy2(resources / "Kapitsa.icns", extension / "Contents/Resources/Kapitsa.icns")
     for name in ["LICENSE", "THIRD_PARTY_NOTICES"]:
         shutil.copy2(ROOT / name, resources / name)
     for target, template in [(extension, APP / "Widget/KapitsaWidget.entitlements"),

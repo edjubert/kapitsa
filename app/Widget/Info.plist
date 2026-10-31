@@ -4,6 +4,7 @@
 <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 <key>CFBundleName</key><string>KapitsaWidget</string>
 <key>CFBundleDisplayName</key><string>Kapitsa</string>
+<key>CFBundleIconFile</key><string>Kapitsa</string>
 <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
 <key>CFBundlePackageType</key><string>XPC!</string>
 <key>CFBundleShortVersionString</key><string>0.2.0</string>

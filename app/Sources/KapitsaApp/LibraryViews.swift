@@ -24,8 +24,8 @@ struct DownloadedModelsView: View {
                            subtitle: "les clones APFS peuvent partager leur espace", symbol: "externaldrive")
             }.padding(24)
             if library.installed.isEmpty {
-                ContentUnavailableView("Aucun modèle téléchargé", systemImage: "internaldrive",
-                    description: Text("Ouvre le catalogue pour télécharger un modèle, ou utilise un dossier local au lancement."))
+                KapitsaEmptyState(title: "Aucun modèle téléchargé",
+                    description: "Ouvre le catalogue pour télécharger un modèle, ou utilise un dossier local au lancement.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Table(models, selection: $selection) {
@@ -183,8 +183,7 @@ struct CatalogView: View {
                             ?? model.variants.first?.id ?? ""
                     }
             } else {
-                ContentUnavailableView(search.isEmpty ? "Chargement du catalogue" : "Aucun résultat",
-                                       systemImage: "square.grid.2x2")
+                KapitsaEmptyState(title: search.isEmpty ? "Chargement du catalogue" : "Aucun résultat")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
