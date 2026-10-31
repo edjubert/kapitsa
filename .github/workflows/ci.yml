@@ -15,7 +15,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, edjubert/native-app-runtime]
 
 permissions:
   contents: read
@@ -117,6 +117,7 @@ jobs:
         with:
           filters: |
             code:
+              - 'app/**'
               - 'sdk/**'
               - 'src/**'
               - 'tools/**'
@@ -138,7 +139,7 @@ jobs:
         if: steps.changes.outputs.code == 'true'
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j"$(sysctl -n hw.ncpu)" --target kapitsa systemone api_test bench_test update_test prefix_cache_test grammar_test structured_check fn_store_test fn_dflash_test dflash_accept_test tokenizer_test iq_layout_test exl3_test vision_pixels_test tree_reduce_test remote_test cluster_test split_place_test qwen4_config_test json_file_test affine_pack_test systemone_test execution_session_test http_stream_test splash_protocol_test splash_runtime_test splash_discover_test splash_plan_test logit_dump
+          cmake --build build -j"$(sysctl -n hw.ncpu)" --target kapitsa systemone api_test bench_test update_test prefix_cache_test grammar_test structured_check fn_store_test fn_dflash_test dflash_accept_test tokenizer_test iq_layout_test exl3_test vision_pixels_test tree_reduce_test remote_test cluster_test split_place_test qwen4_config_test json_file_test affine_pack_test systemone_test execution_session_test http_stream_test runtime_test splash_protocol_test splash_runtime_test splash_discover_test splash_plan_test logit_dump
       - name: SDK C ABI contract
         if: steps.changes.outputs.code == 'true'
         run: |
@@ -207,6 +208,14 @@ jobs:
       - name: http_stream_test
         if: steps.changes.outputs.code == 'true' && !cancelled()
         run: build/http_stream_test
+      - name: Local instance control (CPU only)
+        if: steps.changes.outputs.code == 'true' && !cancelled()
+        run: |
+          build/runtime_test
+          python3 tests/test_instances.py build
+      - name: Native macOS app (CPU fixture)
+        if: steps.changes.outputs.code == 'true' && !cancelled()
+        run: swift test --package-path app
       - name: splash_protocol_test
         if: steps.changes.outputs.code == 'true' && !cancelled()
         run: build/splash_protocol_test
