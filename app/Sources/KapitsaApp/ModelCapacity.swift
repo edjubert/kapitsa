@@ -36,8 +36,9 @@ struct CapacityQuery: Hashable {
     let speculation: Int
     let useDrafter: Bool
     let prefillChunk: Int
+    let drafter: String?
 
-    init(model: String, defaults: LaunchDefaults) {
+    init(model: String, defaults: LaunchDefaults, drafter: String? = nil) {
         self.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         context = defaults.context
         slots = defaults.slots
@@ -45,6 +46,7 @@ struct CapacityQuery: Hashable {
         speculation = defaults.speculation
         useDrafter = defaults.useDrafter
         prefillChunk = defaults.prefillChunk
+        self.drafter = defaults.useDrafter && drafter != "none" ? drafter : nil
     }
 
     func configuration() throws -> RuntimeConfiguration {
@@ -57,7 +59,7 @@ struct CapacityQuery: Hashable {
                                                 context: context, slots: slots)
         return RuntimeConfiguration(instanceId: "capacity", name: config.name, model: config.model,
             port: config.port, context: config.context, slots: config.slots, memBudgetGb: config.memBudgetGb,
-            spec: config.spec, dflash: config.dflash, prefillChunk: config.prefillChunk)
+            spec: config.spec, dflash: config.dflash ?? drafter, prefillChunk: config.prefillChunk)
     }
 }
 
@@ -92,12 +94,13 @@ struct ModelCapacityBanner: View {
     // In the downloaded-model detail, its own running instances already
     // demonstrate a successful start; warn about an additional copy in the form.
     var alreadyRunning = false
+    var replacingInstanceId: String?
     var refreshID = 0
     @State private var capacity: ModelCapacity?
     @State private var checking = true
 
     private var occupiedBytes: UInt64 {
-        store.rows.reduce(0) { $0 + ($1.snapshot?.memoryUsedBytes ?? 0) }
+        store.rows.filter { $0.id != replacingInstanceId }.reduce(0) { $0 + ($1.snapshot?.memoryUsedBytes ?? 0) }
     }
 
     var body: some View {

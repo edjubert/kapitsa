@@ -91,11 +91,14 @@ struct RuntimeSnapshot: Decodable, Sendable {
     let cursor: UInt64
     let events: [RuntimeEvent]?
     let reset: Bool?
+    let managed: Bool?
+    let configuration: RuntimeLaunchConfiguration?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case instanceId, runId, name, state, apiUrl, model, modelDir, context, slots, quant
         case memoryUsedBytes, memoryBudgetBytes, requests, lastRequest, cursor, events, reset
+        case managed, configuration
     }
 }
 
@@ -189,7 +192,23 @@ actor RuntimeClient {
     }
 }
 
-struct RuntimeConfiguration: Codable {
+// Control replies use snake-case decoding, whereas the launch/persistence
+// protocol has explicit snake-case coding keys. Keep the boundary typed.
+struct RuntimeLaunchConfiguration: Decodable, Sendable {
+    let instanceId, name, model: String
+    let port: Int
+    let context, slots, spec, prefillChunk: Int?
+    let memBudgetGb: Double?
+    let dflash, diskCache: String?
+
+    var value: RuntimeConfiguration {
+        RuntimeConfiguration(instanceId: instanceId, name: name, model: model, port: port,
+            context: context, slots: slots, memBudgetGb: memBudgetGb, spec: spec,
+            dflash: dflash, diskCache: diskCache, prefillChunk: prefillChunk)
+    }
+}
+
+struct RuntimeConfiguration: Codable, Equatable, Sendable {
     let instanceId: String
     let name: String
     let model: String

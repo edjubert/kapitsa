@@ -12,11 +12,26 @@ struct LaunchDefaults: Codable, Equatable {
     var prefillChunk = 0
     var useDrafter = true
 
+    init() {}
+
+    init(configuration: RuntimeConfiguration) {
+        model = configuration.model
+        context = configuration.context.map(String.init) ?? ""
+        slots = configuration.slots ?? 0
+        port = configuration.port
+        memory = configuration.memBudgetGb.map { String($0) } ?? ""
+        speculation = configuration.spec ?? -1
+        diskCache = configuration.diskCache ?? ""
+        prefillChunk = configuration.prefillChunk ?? 0
+        useDrafter = configuration.dflash != "none"
+    }
+
     func configuration(name: String, model: String, port: Int,
-                       context: String, slots: Int) throws -> RuntimeConfiguration {
+                       context: String, slots: Int,
+                       editing original: RuntimeConfiguration? = nil) throws -> RuntimeConfiguration {
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let reference = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, title.utf8.count <= 128, !reference.isEmpty else {
+        guard !title.isEmpty, title.utf8.count <= 128, !reference.isEmpty, reference.utf8.count <= 4096 else {
             throw RuntimeFailure.message("Renseigne un nom et un modèle.")
         }
         guard (1...65535).contains(port), (0...4).contains(slots),
@@ -37,11 +52,12 @@ struct LaunchDefaults: Codable, Equatable {
         guard Self.validCache(cache) else {
             throw RuntimeFailure.message("La taille du cache doit être de la forme 10g, 512m ou 0.")
         }
-        return RuntimeConfiguration(instanceId: UUID().uuidString.lowercased(), name: title,
+        return RuntimeConfiguration(instanceId: original?.instanceId ?? UUID().uuidString.lowercased(), name: title,
             model: (reference as NSString).expandingTildeInPath, port: port,
             context: try RuntimeConfiguration.contextTokens(context), slots: slots == 0 ? nil : slots,
             memBudgetGb: budget, spec: speculation == -1 ? nil : speculation,
-            dflash: useDrafter ? nil : "none", diskCache: cache.isEmpty ? nil : cache,
+            dflash: useDrafter ? (original?.dflash == "none" ? nil : original?.dflash) : "none",
+            diskCache: cache.isEmpty ? nil : cache,
             prefillChunk: prefillChunk == 0 ? nil : prefillChunk)
     }
 

@@ -9,6 +9,28 @@ struct InstanceRow: Identifiable {
     let snapshot: RuntimeSnapshot?
     let profile: RuntimeConfiguration?
     let error: String?
+    var pendingEdit = false
+    var requiresManualStop = false
+
+    var editableConfiguration: RuntimeConfiguration? {
+        if let profile { return profile }
+        if let config = snapshot?.configuration { return config.value }
+        guard let state = snapshot, let port = URLComponents(string: state.apiUrl)?.port else { return nil }
+        return RuntimeConfiguration(instanceId: id, name: name, model: state.model, port: port,
+                                    context: state.context, slots: state.slots)
+    }
+
+    var canRestart: Bool {
+        record != nil && !requiresManualStop &&
+            (profile != nil || snapshot?.configuration != nil) &&
+            (snapshot?.managed == true || (snapshot?.managed == nil && profile != nil))
+    }
+
+    var hasPendingChanges: Bool {
+        guard let profile else { return false }
+        guard let running = snapshot?.configuration?.value else { return pendingEdit }
+        return profile != running
+    }
 }
 
 @MainActor
@@ -17,23 +39,36 @@ final class InstanceStore: ObservableObject {
     @Published var selectedId = ""
     @Published var history: [String: [RuntimeEvent]] = [:]
     @Published var lastError: String?
+    @Published var editing: InstanceEditRequest?
+    @Published private(set) var restartingIDs: Set<String> = []
     private let client = RuntimeClient()
+    private let preferences: UserDefaults
+    private let runtimeHome: URL
+    private let launcher: ((RuntimeConfiguration) throws -> Process)?
     private var cursors: [String: UInt64] = [:]
     private var profiles: [RuntimeConfiguration] = []
+    private var pendingRuns: [String: String] = [:]
+    private var incompleteProfiles: Set<String> = []
     private var children: [String: Process] = [:]
     private var refreshing = false
     private var polling: Task<Void, Never>?
 
-    init() {
-        if let data = UserDefaults.standard.data(forKey: "runtimeProfiles") {
+    init(preferences: UserDefaults = .standard, home: URL = Registry.home,
+         poll: Bool = true, launcher: ((RuntimeConfiguration) throws -> Process)? = nil) {
+        self.preferences = preferences
+        runtimeHome = home
+        self.launcher = launcher
+        if let data = preferences.data(forKey: "runtimeProfiles") {
             profiles = (try? JSONDecoder().decode([RuntimeConfiguration].self, from: data)) ?? []
         }
-        polling = Task { [weak self] in
+        pendingRuns = preferences.dictionary(forKey: "runtimePendingEdits") as? [String: String] ?? [:]
+        incompleteProfiles = Set(preferences.stringArray(forKey: "runtimeIncompleteProfiles") ?? [])
+        if poll { polling = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
                 try? await Task.sleep(for: .seconds(1))
             }
-        }
+        } }
     }
 
     var selected: InstanceRow? { rows.first { $0.id == selectedId } }
@@ -43,7 +78,7 @@ final class InstanceStore: ObservableObject {
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
-        let records = Registry.records()
+        let records = records()
         let client = self.client
         let cursors = self.cursors
         let results = await withTaskGroup(of: (RuntimeRecord, RuntimeSnapshot?, String?).self) { group in
@@ -70,7 +105,10 @@ final class InstanceStore: ObservableObject {
                 history[record.runId] = Array(events.suffix(100))
             }
             next.append(InstanceRow(id: record.instanceId, name: record.name, record: record, snapshot: snapshot,
-                                    profile: profiles.first { $0.instanceId == record.instanceId }, error: error))
+                                    profile: profiles.first { $0.instanceId == record.instanceId }, error: error,
+                                    pendingEdit: pendingRuns[record.instanceId] == record.runId,
+                                    requiresManualStop: incompleteProfiles.contains(record.instanceId) &&
+                                        snapshot?.configuration == nil))
         }
         for profile in profiles where !next.contains(where: { $0.id == profile.instanceId }) {
             next.append(InstanceRow(id: profile.instanceId, name: profile.name, record: nil, snapshot: nil,
@@ -92,31 +130,19 @@ final class InstanceStore: ObservableObject {
         } catch { lastError = error.localizedDescription }
     }
 
-    func start(_ config: RuntimeConfiguration) async {
+    @discardableResult
+    func start(_ config: RuntimeConfiguration) async -> Bool {
         do {
-            guard RuntimeRecord.validId(config.instanceId) else {
-                throw RuntimeFailure.message("Identifiant d’instance invalide.")
+            try validate(config)
+            guard !records().contains(where: { $0.instanceId == config.instanceId }),
+                  children[config.instanceId]?.isRunning != true else {
+                throw RuntimeFailure.message("Cette instance fonctionne déjà. Actualise sa fiche.")
             }
-            let process = Process()
-            process.executableURL = try NativeHelper.executableURL()
-            let input = Pipe()
-            _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-            process.standardInput = input
-            let logs = Registry.home.appendingPathComponent("logs")
-            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
-            let logURL = logs.appendingPathComponent("instance-\(config.instanceId).log")
-            if !FileManager.default.fileExists(atPath: logURL.path) {
-                guard FileManager.default.createFile(atPath: logURL.path, contents: nil,
-                    attributes: [.posixPermissions: 0o600]) else {
-                    throw RuntimeFailure.message("Impossible de créer le journal de l’instance.")
-                }
-            }
-            let output = try FileHandle(forWritingTo: logURL)
-            try output.seekToEnd()
-            process.standardOutput = output
-            process.standardError = output
+            let process = try launcher?(config) ?? launchNative(config)
+            children[config.instanceId] = process
             process.terminationHandler = { [weak self] process in
                 Task { @MainActor in
+                    guard self?.children[config.instanceId] === process else { return }
                     self?.children.removeValue(forKey: config.instanceId)
                     if process.terminationStatus != 0 && process.terminationReason == .exit {
                         self?.lastError = "L’instance « \(config.name) » s’est arrêtée (code \(process.terminationStatus)). Consulte son journal."
@@ -124,32 +150,149 @@ final class InstanceStore: ObservableObject {
                     await self?.refresh()
                 }
             }
-            let bytes = try JSONEncoder().encode(config)
-            guard bytes.count <= 16_384 else { throw RuntimeFailure.message("Configuration trop volumineuse.") }
-            try process.run()
-            children[config.instanceId] = process
-            try input.fileHandleForWriting.write(contentsOf: bytes)
-            try input.fileHandleForWriting.close()
-            try output.close()
-            if let index = profiles.firstIndex(where: { $0.instanceId == config.instanceId }) {
-                profiles[index] = config
-            } else {
-                profiles.append(config)
-            }
-            if let data = try? JSONEncoder().encode(profiles) {
-                UserDefaults.standard.set(data, forKey: "runtimeProfiles")
-            }
+            try persist(config)
+            pendingRuns.removeValue(forKey: config.instanceId)
+            preferences.set(pendingRuns, forKey: "runtimePendingEdits")
+            incompleteProfiles.remove(config.instanceId)
+            preferences.set(Array(incompleteProfiles), forKey: "runtimeIncompleteProfiles")
             selectedId = config.instanceId
             lastError = nil
             await refresh()
-        } catch { lastError = error.localizedDescription }
+            return true
+        } catch { lastError = error.localizedDescription; return false }
+    }
+
+    func save(_ config: RuntimeConfiguration, for target: InstanceRow, restart: Bool) async throws {
+        guard config.instanceId == target.id, !restartingIDs.contains(target.id) else {
+            throw RuntimeFailure.message("Cette instance est déjà en cours de modification.")
+        }
+        try validate(config)
+        let current = records().first { $0.instanceId == target.id }
+        guard current?.runId == target.record?.runId else {
+            throw RuntimeFailure.message("L’instance a changé depuis l’ouverture du formulaire. Rouvre sa fiche.")
+        }
+        if restart {
+            guard let record = target.record, target.canRestart else {
+                throw RuntimeFailure.message("Cette instance doit être arrêtée depuis sa fiche avant son prochain lancement.")
+            }
+            restartingIDs.insert(target.id)
+            defer { restartingIDs.remove(target.id) }
+            // Check ownership and current protocol capabilities before changing anything.
+            let state = try await client.fetch(record)
+            guard state.managed != false else {
+                throw RuntimeFailure.message("Cette instance CLI ne peut pas être redémarrée avec les options de l’app.")
+            }
+            try await client.stop(record)
+            // Retain the edit even if shutdown times out or the new model fails.
+            try persist(config)
+            pendingRuns[target.id] = record.runId
+            preferences.set(pendingRuns, forKey: "runtimePendingEdits")
+            let deadline = ContinuousClock.now + .seconds(30)
+            while let owner = records().first(where: { $0.instanceId == target.id }) {
+                guard owner.runId == record.runId else {
+                    throw RuntimeFailure.message("Une autre exécution a démarré. Elle n’a pas été interrompue.")
+                }
+                guard ContinuousClock.now < deadline else {
+                    throw RuntimeFailure.message("L’arrêt prend trop de temps. La configuration est enregistrée ; redémarre l’instance une fois arrêtée.")
+                }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            // The owner removes its record just before releasing its file lock.
+            try await Task.sleep(for: .milliseconds(100))
+            if let child = children[target.id], !child.isRunning { children.removeValue(forKey: target.id) }
+            guard await start(config) else {
+                throw RuntimeFailure.message(lastError ?? "Impossible de redémarrer cette instance.")
+            }
+        } else {
+            if target.record != nil && !target.canRestart {
+                incompleteProfiles.insert(target.id)
+                preferences.set(Array(incompleteProfiles), forKey: "runtimeIncompleteProfiles")
+            }
+            try persist(config)
+            if let record = target.record, config != target.editableConfiguration {
+                pendingRuns[target.id] = record.runId
+                preferences.set(pendingRuns, forKey: "runtimePendingEdits")
+            }
+            lastError = nil
+            await refresh()
+        }
+    }
+
+    private func records() -> [RuntimeRecord] {
+        Registry.records(in: runtimeHome.appendingPathComponent("instances"))
+    }
+
+    private func validate(_ config: RuntimeConfiguration) throws {
+        guard RuntimeRecord.validId(config.instanceId), config.protocolVersion == 1,
+              config.context.map({ (1...1_048_576).contains($0) }) ?? true,
+              config.slots.map({ (1...4).contains($0) }) ?? true,
+              config.prefillChunk.map({ (1...8192).contains($0) }) ?? true else {
+            throw RuntimeFailure.message("Identifiant ou limites d’instance invalides.")
+        }
+        let draft = LaunchDefaults(configuration: config)
+        _ = try draft.configuration(name: config.name, model: config.model, port: config.port,
+                                    context: draft.context, slots: draft.slots, editing: config)
+        guard try JSONEncoder().encode(config).count <= 16_384 else {
+            throw RuntimeFailure.message("Configuration trop volumineuse.")
+        }
+        let conflict = rows.first { row in
+            row.id != config.instanceId && row.record != nil &&
+                (row.snapshot.flatMap { URLComponents(string: $0.apiUrl)?.port } ??
+                 row.profile?.port ?? row.snapshot?.configuration?.port) == config.port
+        }
+        if let conflict {
+            throw RuntimeFailure.message("Le port \(config.port) est utilisé par « \(conflict.name) ». Choisis un autre port.")
+        }
+    }
+
+    private func persist(_ config: RuntimeConfiguration) throws {
+        var next = profiles.filter { $0.instanceId != config.instanceId }
+        next.append(config)
+        preferences.set(try JSONEncoder().encode(next), forKey: "runtimeProfiles")
+        profiles = next
+    }
+
+    private func launchNative(_ config: RuntimeConfiguration) throws -> Process {
+        let process = Process()
+        process.executableURL = try NativeHelper.executableURL()
+        let input = Pipe()
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        process.standardInput = input
+        let logs = runtimeHome.appendingPathComponent("logs")
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let logURL = logs.appendingPathComponent("instance-\(config.instanceId).log")
+        if !FileManager.default.fileExists(atPath: logURL.path) {
+            guard FileManager.default.createFile(atPath: logURL.path, contents: nil,
+                attributes: [.posixPermissions: 0o600]) else {
+                throw RuntimeFailure.message("Impossible de créer le journal de l’instance.")
+            }
+        }
+        let output = try FileHandle(forWritingTo: logURL)
+        defer { try? output.close() }
+        try output.seekToEnd()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        do {
+            try input.fileHandleForWriting.write(contentsOf: JSONEncoder().encode(config))
+            try input.fileHandleForWriting.close()
+        } catch {
+            try? input.fileHandleForWriting.close()
+            if process.isRunning { process.terminate() }
+            throw error
+        }
+        return process
     }
 
     func forget(_ row: InstanceRow) {
         guard row.record == nil else { return }
         profiles.removeAll { $0.instanceId == row.id }
+        pendingRuns.removeValue(forKey: row.id)
+        preferences.set(pendingRuns, forKey: "runtimePendingEdits")
+        incompleteProfiles.remove(row.id)
+        preferences.set(Array(incompleteProfiles), forKey: "runtimeIncompleteProfiles")
         if let data = try? JSONEncoder().encode(profiles) {
-            UserDefaults.standard.set(data, forKey: "runtimeProfiles")
+            preferences.set(data, forKey: "runtimeProfiles")
         }
         rows.removeAll { $0.id == row.id }
         if selectedId == row.id { selectedId = rows.first?.id ?? "" }

@@ -50,4 +50,17 @@ Options native_options(const ojson& j) {
   }
   return o;
 }
+
+ojson native_configuration(const Options& o) {
+  ojson j{{"protocol", runtime::kProtocol}, {"instance_id", o.instance_id},
+          {"name", o.name}, {"model", o.model}, {"port", o.port}};
+  if (o.context_req > 0) j["context"] = o.context_req;
+  if (o.engine.slots > 0) j["slots"] = o.engine.slots;
+  if (o.engine.mem_budget_gb > 0) j["mem_budget_gb"] = o.engine.mem_budget_gb;
+  if (o.engine.spec_depth >= 0) j["spec"] = o.engine.spec_depth;
+  if (!o.engine.dflash.empty()) j["dflash"] = o.engine.dflash;
+  if (!o.engine.disk_cache.empty()) j["disk_cache"] = o.engine.disk_cache;
+  if (o.engine.prefill_chunk > 0) j["prefill_chunk"] = o.engine.prefill_chunk;
+  return j;
+}
 }  // namespace ni::server

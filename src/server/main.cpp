@@ -909,6 +909,9 @@ static int serve(int argc, char** argv, int first) {
 }
 
 int ni::server::run_service(Options config) {
+  // Retain requested auto values before defaults and model resolution mutate
+  // the engine options. Only the native protocol is safe to relaunch from an app.
+  const auto launch_configuration = config.managed ? native_configuration(config) : ojson();
   if (!config.managed) exit_with_parent();
   auto& opt = config.engine;
   auto& context_req = config.context_req;
@@ -1028,6 +1031,7 @@ int ni::server::run_service(Options config) {
   runtime::observe(instance);
   log_observer() = runtime::log_event;
   instance->update({{"state", "preparing"}, {"managed", config.managed}, {"port", port}});
+  if (config.managed) instance->update({{"configuration", launch_configuration}});
   std::vector<std::string> notes;  // the terminal UI's, shown under its header once the server will start
   if (switch_here) {
     const std::string say = "--allow-switch keeps this server on this Mac: give --api-key to share it.";
