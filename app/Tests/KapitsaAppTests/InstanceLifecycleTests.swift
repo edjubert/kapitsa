@@ -97,9 +97,113 @@ final class InstanceLifecycleTests: XCTestCase {
         XCTAssertEqual(other.runId, second.runId)
     }
 
+    func testDeleteStoppedProfilePreservesModelsChatAndPersistsAcrossRelaunch() async throws {
+        let configurations = [config("first"), config("second", port: 8001)]
+        preferences.set(try JSONEncoder().encode(configurations), forKey: "runtimeProfiles")
+        preferences.set(["first": "previous"], forKey: "runtimePendingEdits")
+        preferences.set(["first"], forKey: "runtimeIncompleteProfiles")
+        let models = home.appendingPathComponent("models/fake")
+        let chat = home.appendingPathComponent("chats/first.json")
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: chat.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("Saved chat".utf8).write(to: chat)
+        let instances = store()
+        await instances.refresh()
+        let target = try XCTUnwrap(instances.rows.first { $0.id == "first" })
+        instances.selectedId = target.id
+        let deleted = await instances.delete(target)
+        XCTAssertTrue(deleted, instances.lastError ?? "")
+        XCTAssertEqual(instances.rows.map(\.id), ["second"])
+        XCTAssertEqual(instances.selectedId, "second")
+        XCTAssertTrue(instances.deletingIDs.isEmpty)
+        XCTAssertNil(preferences.dictionary(forKey: "runtimePendingEdits")?["first"])
+        XCTAssertEqual(preferences.stringArray(forKey: "runtimeIncompleteProfiles"), [])
+        let reloaded = store()
+        await reloaded.refresh()
+        XCTAssertEqual(reloaded.rows.map(\.id), ["second"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: models.path))
+        XCTAssertEqual(try Data(contentsOf: chat), Data("Saved chat".utf8))
+    }
 
+    func testDeleteStopsOnlyCapturedInstanceAndPreventsConcurrentStart() async throws {
+        let configuration = config("first")
+        preferences.set(try JSONEncoder().encode([configuration]), forKey: "runtimeProfiles")
+        _ = try fixture(configuration)
+        _ = try fixture(config("second", port: 8001))
+        _ = try await record("first")
+        let second = try await record("second")
+        let instances = store()
+        await instances.refresh()
+        let target = try XCTUnwrap(instances.rows.first { $0.id == "first" })
+        let deletion = Task { await instances.delete(target) }
+        for _ in 0..<50 where !instances.deletingIDs.contains("first") {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(instances.deletingIDs.contains("first"))
+        let attemptedStart = await instances.start(configuration)
+        XCTAssertFalse(attemptedStart)
+        let deleted = await deletion.value
+        XCTAssertTrue(deleted, instances.lastError ?? "")
+        XCTAssertNil(instances.rows.first { $0.id == "first" })
+        XCTAssertEqual(processes.count, 2)
+        let unaffected = try await RuntimeClient().status(second)
+        XCTAssertEqual(unaffected.runId, second.runId)
+        let reloaded = store()
+        await reloaded.refresh()
+        XCTAssertNil(reloaded.rows.first { $0.id == "first" })
+    }
 
+    func testDeletionConfirmationCannotRemoveReplacementExecution() async throws {
+        let configuration = config("first")
+        preferences.set(try JSONEncoder().encode([configuration]), forKey: "runtimeProfiles")
+        let instances = store()
+        await instances.refresh()
+        let stoppedTarget = try XCTUnwrap(instances.selected)
+        _ = try fixture(configuration)
+        let first = try await record("first")
+        await instances.refresh()
+        let liveTarget = try XCTUnwrap(instances.selected)
+        try await RuntimeClient().stop(first)
+        try await waitForExit(processes[0])
+        _ = try fixture(configuration)
+        let next = try await record("first")
+        XCTAssertNotEqual(next.runId, first.runId)
+        for target in [stoppedTarget, liveTarget] {
+            let deleted = await instances.delete(target)
+            XCTAssertFalse(deleted)
+            XCTAssertTrue(instances.lastError?.contains("redémarré") == true)
+            let state = try await RuntimeClient().status(next)
+            XCTAssertEqual(state.runId, next.runId)
+            XCTAssertEqual(instances.selected?.profile, configuration)
+        }
+    }
 
+    func testUnreachableOwnerIsNotPrunedStartedOverOrForgotten() async throws {
+        let configuration = config("first")
+        preferences.set(try JSONEncoder().encode([configuration]), forKey: "runtimeProfiles")
+        _ = try fixture(configuration)
+        let owner = try await record("first")
+        let file = home.appendingPathComponent("instances/first.json")
+        var values = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        values["control_url"] = "http://127.0.0.1:1"
+        try JSONSerialization.data(withJSONObject: values).write(to: file)
+        let instances = store()
+        await instances.refresh()
+        let target = try XCTUnwrap(instances.selected)
+        XCTAssertNil(target.snapshot)
+        XCTAssertEqual(target.lifecycle, "unreachable")
+        XCTAssertNotNil(target.record)
+        let started = await instances.start(configuration)
+        XCTAssertFalse(started)
+        let deleted = await instances.delete(target)
+        XCTAssertFalse(deleted)
+        XCTAssertTrue(instances.lastError?.contains("conservée") == true)
+        instances.forget(target)
+        XCTAssertNotNil(instances.selected?.profile)
+        let state = try await RuntimeClient().status(owner)
+        XCTAssertEqual(state.runId, owner.runId)
+        XCTAssertTrue(processes[0].isRunning)
+    }
 
     func testOrphanCleanupRefusesChangedRunAndUnsafeLock() async throws {
         let process = try fixture(config("first"))

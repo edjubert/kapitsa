@@ -42,7 +42,9 @@ final class InstanceStore: ObservableObject {
     @Published var history: [String: [RuntimeEvent]] = [:]
     @Published var lastError: String?
     @Published var editing: InstanceEditRequest?
+    @Published var deletion: InstanceRow?
     @Published private(set) var startingIDs: Set<String> = []
+    @Published private(set) var deletingIDs: Set<String> = []
     @Published private(set) var restartingIDs: Set<String> = []
     @Published var widgetOpenRequest = UUID()
     private let widgetPublisher: WidgetPublisher?
@@ -81,7 +83,7 @@ final class InstanceStore: ObservableObject {
     var selected: InstanceRow? { rows.first { $0.id == selectedId } }
     var activeRequests: Int { rows.reduce(0) { $0 + ($1.snapshot?.requests.count ?? 0) } }
     func isChanging(_ id: String) -> Bool {
-        startingIDs.contains(id) || restartingIDs.contains(id)
+        startingIDs.contains(id) || restartingIDs.contains(id) || deletingIDs.contains(id)
     }
 
     func refresh() async {
@@ -178,6 +180,7 @@ final class InstanceStore: ObservableObject {
                     self?.children.removeValue(forKey: config.instanceId)
                     if process.terminationStatus != 0 &&
                         self?.startingIDs.contains(config.instanceId) != true &&
+                        self?.deletingIDs.contains(config.instanceId) != true &&
                         self?.restartingIDs.contains(config.instanceId) != true &&
                         !(process.terminationReason == .uncaughtSignal && process.terminationStatus == SIGTERM) {
                         self?.lastError = NativeHelper.failureMessage(config, process: process,
@@ -310,18 +313,70 @@ final class InstanceStore: ObservableObject {
     }
 
     func forget(_ row: InstanceRow) {
-        guard row.record == nil else { return }
-        profiles.removeAll { $0.instanceId == row.id }
-        pendingRuns.removeValue(forKey: row.id)
+        guard row.record == nil, !isChanging(row.id),
+              !records().contains(where: { $0.instanceId == row.id }) else { return }
+        try? removeProfile(row.id)
+    }
+
+    private func removeProfile(_ id: String) throws {
+        let next = profiles.filter { $0.instanceId != id }
+        preferences.set(try JSONEncoder().encode(next), forKey: "runtimeProfiles")
+        profiles = next
+        pendingRuns.removeValue(forKey: id)
         preferences.set(pendingRuns, forKey: "runtimePendingEdits")
-        incompleteProfiles.remove(row.id)
+        incompleteProfiles.remove(id)
         preferences.set(Array(incompleteProfiles), forKey: "runtimeIncompleteProfiles")
-        if let data = try? JSONEncoder().encode(profiles) {
-            preferences.set(data, forKey: "runtimeProfiles")
-        }
-        rows.removeAll { $0.id == row.id }
-        if selectedId == row.id { selectedId = rows.first?.id ?? "" }
+        rows.removeAll { $0.id == id }
+        if selectedId == id { selectedId = rows.first?.id ?? "" }
+        if editing?.configuration.instanceId == id { editing = nil }
         widgetPublisher?.publish(rows)
+    }
+
+    @discardableResult
+    func delete(_ target: InstanceRow) async -> Bool {
+        guard !isChanging(target.id) else {
+            lastError = "Une opération est déjà en cours sur cette instance."
+            return false
+        }
+        deletingIDs.insert(target.id)
+        defer { deletingIDs.remove(target.id) }
+        do {
+            let current = records().first { $0.instanceId == target.id }
+            if let current {
+                guard current.runId == target.record?.runId else {
+                    throw RuntimeFailure.message("L’instance a redémarré depuis la confirmation. Sa nouvelle exécution a été conservée.")
+                }
+                do { try await client.stop(current) }
+                catch {
+                    throw RuntimeFailure.message("Impossible d’arrêter « \(target.name) » : \(error.localizedDescription) Sa configuration a été conservée.")
+                }
+                let deadline = ContinuousClock.now + .seconds(30)
+                while let owner = records().first(where: { $0.instanceId == target.id }) {
+                    guard owner.runId == current.runId else {
+                        throw RuntimeFailure.message("Une autre exécution a démarré. Elle n’a pas été supprimée.")
+                    }
+                    guard ContinuousClock.now < deadline else {
+                        throw RuntimeFailure.message("L’arrêt prend trop de temps. L’instance a été conservée ; réessaie après son arrêt.")
+                    }
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+            }
+            // Keep a concurrent CLI start from racing the final profile removal.
+            try Registry.withIdleInstance(target.id, in: runtimeHome.appendingPathComponent("instances")) {
+                guard !Registry.records(in: runtimeHome.appendingPathComponent("instances"))
+                    .contains(where: { $0.instanceId == target.id }) else {
+                    throw RuntimeFailure.message("Une autre exécution a démarré. Elle n’a pas été supprimée.")
+                }
+                try removeProfile(target.id)
+            }
+            lastError = nil
+            await refresh()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            await refresh()
+            return false
+        }
     }
 
     private func preserveConfiguration(_ row: InstanceRow) throws {
