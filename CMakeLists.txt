@@ -172,11 +172,16 @@ set_tests_properties(splash_plan_test PROPERTIES TIMEOUT 30)
 # translations (src/api/) and the updater (src/update/) are in the library.
 # build/nace-infer-server stays as a symlink to it for scripts written before the rename.
 set(KAPITSA_CHAT ${CMAKE_BINARY_DIR}/generated/chat_page.cpp)
+set(KAPITSA_BRAND ${CMAKE_SOURCE_DIR}/docs/assets/brand)
+set(KAPITSA_CHAT_BRAND kapitsa-icon.svg kapitsa-logo-light.svg kapitsa-logo-dark.svg
+  kapitsa-mark.svg kapitsa-mark-light.svg)
+list(TRANSFORM KAPITSA_CHAT_BRAND PREPEND "${KAPITSA_BRAND}/")
 add_custom_command(
   OUTPUT ${KAPITSA_CHAT}
   COMMAND ${CMAKE_COMMAND} -DOUT=${KAPITSA_CHAT} -DSRC=${CMAKE_SOURCE_DIR}/src/server/chat.html -DNAME=kChatPage
+          -DBRAND=${KAPITSA_BRAND}
           -P ${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake
-  DEPENDS ${CMAKE_SOURCE_DIR}/src/server/chat.html ${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake
+  DEPENDS ${CMAKE_SOURCE_DIR}/src/server/chat.html ${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake ${KAPITSA_CHAT_BRAND}
   COMMENT "Embedding the chat page")
 add_library(kapitsa_server STATIC ${CMAKE_SOURCE_DIR}/src/server/main.cpp ${CMAKE_SOURCE_DIR}/src/server/native_execution.cpp
   ${CMAKE_SOURCE_DIR}/src/server/http_stream.cpp
