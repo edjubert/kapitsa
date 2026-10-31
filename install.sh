@@ -1,12 +1,12 @@
 #!/bin/bash
 # Kapitsa installer: puts `kapitsa` on your PATH. Safe to run again (updates in place).
-#   curl -fsSL https://raw.githubusercontent.com/nace-ai/kapitsa/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/edjubert/kapitsa/main/install.sh | bash
 #                  installs the latest release, a prebuilt binary (no compiler, Homebrew or sudo needed)
 #   ./install.sh   in a clone: builds that checkout instead (Command Line Tools and CMake)
 # Options: ./install.sh --help, or curl ... | bash -s -- --help
 set -euo pipefail
 
-KAPITSA_REPO=nace-ai/kapitsa
+KAPITSA_REPO=edjubert/kapitsa
 KAPITSA_SELF="${BASH_SOURCE[0]:-}" # empty when piped into bash (read here: inside a function it says "bash")
 
 say() { printf '%s\n' "$*"; }
@@ -168,6 +168,11 @@ install_kapitsa() {
   done
   install -m 0755 "$1" "$prefix/kapitsa" || die "can't write $prefix/kapitsa (--prefix picks another folder)."
   installed=$("$prefix/kapitsa" --version) || die "the installed $prefix/kapitsa does not run."
+  local runtime="${1%/*}/kapitsa-runtime"
+  if [ -f "$runtime" ]; then
+    install -m 0755 "$runtime" "$prefix/kapitsa-runtime" || die "can't write $prefix/kapitsa-runtime."
+    "$prefix/kapitsa-runtime" --help > /dev/null 2>&1 || die "the installed runtime does not run."
+  fi
   local systemone=""
   if [ -f "${3:-}" ]; then
     install -m 0755 "$3" "$prefix/kapitsa-systemone" || die "can't write $prefix/kapitsa-systemone."

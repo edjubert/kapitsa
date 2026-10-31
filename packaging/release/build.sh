@@ -45,7 +45,7 @@ clean_env=(env -u CFLAGS -u CXXFLAGS -u OBJCFLAGS -u OBJCXXFLAGS -u CPPFLAGS -u 
 "${clean_env[@]}" cmake -S "$work/src" -B "$work/obj" -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET="$minos" -DKAPITSA_GIT="$short"
 "${clean_env[@]}" cmake --build "$work/obj" --target kapitsa systemone -j "$(sysctl -n hw.ncpu)"
-for target in naceinfer kapitsa systemone; do
+for target in naceinfer kapitsa_server kapitsa kapitsa-runtime systemone; do
   flags=$(grep -E '^(C|CXX|OBJCXX)_FLAGS = ' "$work/obj/CMakeFiles/$target.dir/flags.make")
   if [ -z "$flags" ] || printf '%s\n' "$flags" | grep -v -q -- ' -O3'; then
     die "the $target target did not compile with -O3: $flags"
@@ -55,12 +55,14 @@ done
 # 2. Strip and sign (hardened runtime either way, so the ad hoc build runs as the notarized one would)
 bin="$work/stage/$name/kapitsa"
 sysbin="$work/stage/$name/kapitsa-systemone"
+runtimebin="$work/stage/$name/kapitsa-runtime"
 install -m 0755 "$work/obj/kapitsa" "$bin"
 install -m 0755 "$work/obj/systemone" "$sysbin"
+install -m 0755 "$work/obj/kapitsa-runtime" "$runtimebin"
 if [ -z "${KAPITSA_SIGN_IDENTITY:-}" ] && [ -n "${KAPITSA_NOTARY_PROFILE:-}" ]; then
   die "notarizing needs a Developer ID signature: set KAPITSA_SIGN_IDENTITY too."
 fi
-for b in "$bin" "$sysbin"; do
+for b in "$bin" "$sysbin" "$runtimebin"; do
   strip "$b"
   sign=(codesign --force --options runtime --identifier "ai.nace.$(basename "$b")")
   if [ -n "${KAPITSA_SIGN_IDENTITY:-}" ]; then
@@ -74,7 +76,7 @@ for b in "$bin" "$sysbin"; do
 done
 if [ -n "${KAPITSA_NOTARY_PROFILE:-}" ]; then
   mkdir "$work/notarize"
-  cp "$bin" "$sysbin" "$work/notarize/"
+  cp "$bin" "$sysbin" "$runtimebin" "$work/notarize/"
   ditto -c -k --keepParent "$work/notarize" "$work/notarize.zip"
   xcrun notarytool submit "$work/notarize.zip" --keychain-profile "$KAPITSA_NOTARY_PROFILE" \
     ${KAPITSA_KEYCHAIN:+--keychain "$KAPITSA_KEYCHAIN"} --wait --timeout 1h --output-format json > "$work/notary.json" || true
@@ -89,7 +91,7 @@ if [ -n "${KAPITSA_NOTARY_PROFILE:-}" ]; then
 fi
 
 # 3. Check what ships: arm64 only, the deployment target, system libraries only, the version
-for b in "$bin" "$sysbin"; do
+for b in "$bin" "$sysbin" "$runtimebin"; do
   what=$(basename "$b")
   [ "$(lipo -archs "$b")" = arm64 ] || die "$what is $(lipo -archs "$b"), not arm64 only."
   build_info=$(vtool -show-build "$b")
