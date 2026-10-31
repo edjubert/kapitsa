@@ -17,6 +17,7 @@ struct Options {
 };
 
 Options native_options(const ojson& config);
+ojson native_configuration(const Options& options);
 int run_service(Options options);
 }  // namespace server
 }  // namespace ni

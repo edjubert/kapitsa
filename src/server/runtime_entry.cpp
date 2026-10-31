@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
     }
     auto options = ni::server::native_options(request);
     if (check) {
-      std::cout << "{\"protocol\":1,\"status\":\"valid\"}\n";
+      emit({{"protocol", 1}, {"status", "valid"}, {"configuration", ni::server::native_configuration(options)}});
       return 0;
     }
     // A managed runtime outlives the app/CLI which launched it. It must not

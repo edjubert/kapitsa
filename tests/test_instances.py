@@ -139,6 +139,20 @@ class Instances(unittest.TestCase):
             self.assertEqual(p.returncode == 0, i == 0, p.stderr)
         self.assertFalse((self.home / "instances" / "native.json").exists())
 
+    def test_native_configuration_roundtrip_preserves_requested_options(self):
+        base = {"protocol": 1, "instance_id": "edit", "name": "Edited", "model": "fake", "port": 8012}
+        explicit = dict(base, context=92160, slots=2, spec=0, mem_budget_gb=24.5,
+                        dflash="/custom/drafter", disk_cache="512m", prefill_chunk=512)
+        for config in [base, explicit]:
+            p = subprocess.run([str(BUILD / "kapitsa-runtime"), "--check"], input=json.dumps(config),
+                               env=self.env, text=True, capture_output=True, timeout=5)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            exported = json.loads(p.stdout)["configuration"]
+            self.assertEqual(exported, config)
+            second = subprocess.run([str(BUILD / "kapitsa-runtime"), "--check"], input=json.dumps(exported),
+                                    env=self.env, text=True, capture_output=True, timeout=5)
+            self.assertEqual(second.returncode, 0, second.stderr)
+
     def test_z_stop_selects_only_one_instance(self):
         other = self.status("code")["run_id"]
         p = self.run_cli("stop", "--instance", "chat", "--json")

@@ -3,6 +3,7 @@
 #include <httplib/httplib.h>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -22,11 +23,16 @@ static void check(bool ok, const char* message) {
 
 int main(int argc, char** argv) {
   try {
-    if (argc == 4 && std::string(argv[1]) == "--fixture") {
+    if ((argc == 4 || argc == 5) && std::string(argv[1]) == "--fixture") {
       std::atomic<bool> stopped = false;
-      runtime::Instance instance(argv[2], argv[3], argv[3], "http://127.0.0.1:8000", "fake", "test",
+      const json config = argc == 5 ? json::parse(argv[4]) :
+          json{{"protocol", 1}, {"instance_id", argv[3]}, {"name", argv[3]}, {"model", "fake"}, {"port", 8000}};
+      runtime::Instance instance(argv[2], argv[3], config.at("name"), "http://127.0.0.1:" +
+                                 std::to_string(config.at("port").get<int>()), config.at("model"), "test",
                                  [&] { stopped = true; });
-      instance.update({{"state", "ready"}, {"context", 32768}, {"slots", 4}});
+      instance.update({{"state", "ready"}, {"context", config.value("context", 32768)},
+                       {"slots", config.value("slots", 4)}, {"managed", true}});
+      if (!getenv("KAPITSA_FIXTURE_LEGACY")) instance.update({{"configuration", config}});
       auto live = std::make_shared<LiveDecode>();
       instance.begin_request("fixture", live);
       live->phase = 2;
