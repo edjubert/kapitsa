@@ -4,6 +4,7 @@ import os
 import plistlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,9 @@ BUILD = ROOT / "build/native-app"
 BRAND = ROOT / "docs/assets/brand"
 BRAND_ASSETS = ["kapitsa-icon-1024.png", "kapitsa-mark-1024.png", "kapitsa-mark-light-1024.png",
                 "kapitsa-logo-dark-1024.png", "kapitsa-logo-light-1024.png"]
+LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/"
+              "LaunchServices.framework/Versions/Current/Support/lsregister")
+WIDGET = Path("Contents/PlugIns/KapitsaWidget.appex")
 
 
 def run(*args, **kwargs):
@@ -191,9 +195,47 @@ def main():
 
 
 def register(bundle):
-    run("/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/"
-        "LaunchServices.framework/Versions/Current/Support/lsregister", "-f", "-R", str(bundle))
-    run("pluginkit", "-a", str(bundle / "Contents/PlugIns/KapitsaWidget.appex"))
+    run(LSREGISTER, "-f", "-R", str(bundle))
+    run("pluginkit", "-a", str(bundle / WIDGET))
+
+
+def registered_widget_bundles():
+    # Include other checkouts: opening a development bundle registers it too.
+    result = run("pluginkit", "-m", "-A", "-D", "-v", "-i", "io.github.edjubert.kapitsa.widget",
+                 capture_output=True, text=True)
+    bundles = set()
+    for line in result.stdout.splitlines():
+        path = line.rpartition("\t")[2]
+        if not path.startswith("/"):
+            continue
+        extension = Path(path)
+        bundle = extension.parent.parent.parent
+        if extension != bundle / WIDGET:
+            continue
+        try:
+            app_info = plistlib.loads((bundle / "Contents/Info.plist").read_bytes())
+            widget_info = plistlib.loads((extension / "Contents/Info.plist").read_bytes())
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            continue
+        if (app_info.get("CFBundleIdentifier") == "io.github.edjubert.kapitsa" and
+                widget_info.get("CFBundleIdentifier") == "io.github.edjubert.kapitsa.widget"):
+            bundles.add(bundle.resolve())
+    return bundles
+
+
+def stop_widget_processes(bundles):
+    # Reopening the app does not replace an already running extension. Its old
+    # build number makes WidgetKit reject timelines from the updated bundle.
+    executables = {(bundle / WIDGET / "Contents/MacOS/KapitsaWidget").resolve() for bundle in bundles}
+    processes = run("ps", "-U", str(os.getuid()), "-o", "pid=,comm=",
+                    capture_output=True, text=True)
+    for line in processes.stdout.splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) == 2 and Path(fields[1]).resolve() in executables:
+            try:
+                os.kill(int(fields[0]), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
 
 
 def install():
@@ -210,20 +252,23 @@ def install():
         shutil.rmtree(temporary)
     shutil.copytree(ROOT / "build/Kapitsa.app", temporary)
     run("codesign", "--verify", "--deep", "--strict", str(temporary))
+    copies = registered_widget_bundles() | {
+        (ROOT / "build/Kapitsa.app").resolve(),
+        (ROOT / "build/Kapitsa.previous.app").resolve(), previous.resolve(),
+    }
     if previous.exists():
         shutil.rmtree(previous)
     if destination.exists():
         destination.rename(previous)
     temporary.rename(destination)
+    stop_widget_processes(copies | {destination.resolve()})
     # Keep build/backup copies out of WidgetKit's candidate set. Matching
     # bundle IDs with different versions can invalidate archived timelines.
-    lsregister = ("/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/"
-                  "LaunchServices.framework/Versions/Current/Support/lsregister")
-    for copy in [ROOT / "build/Kapitsa.app", ROOT / "build/Kapitsa.previous.app", previous]:
-        if copy.exists() and copy != destination:
-            subprocess.run([lsregister, "-u", str(copy)],
+    for copy in sorted(copies):
+        if copy.exists() and copy != destination.resolve():
+            subprocess.run([LSREGISTER, "-u", str(copy)],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["pluginkit", "-r", str(copy / "Contents/PlugIns/KapitsaWidget.appex")],
+            subprocess.run(["pluginkit", "-r", str(copy / WIDGET)],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     register(destination)
     print(f"Installed {destination}. Reopen the app after an update.")
