@@ -155,13 +155,13 @@ struct InstanceConfigurationSummary: View {
         GroupBox("Configuration enregistrée") {
             VStack(spacing: 10) {
                 LabeledContent("Nom", value: configuration.name)
-                LabeledContent("Modèle", value: configuration.model)
+                LabeledContent("Modèle", value: abbreviatedHomePath(configuration.model))
                 LabeledContent("Port API", value: String(configuration.port))
                 LabeledContent("Contexte", value: configuration.context.map { "\($0.formatted()) tokens" } ?? "Automatique")
                 LabeledContent("Conversations simultanées", value: configuration.slots.map(String.init) ?? "Automatique")
                 LabeledContent("Budget mémoire", value: configuration.memBudgetGb.map { "\($0) GB" } ?? "Automatique")
                 LabeledContent("Spéculation", value: configuration.spec.map(String.init) ?? "Automatique")
-                LabeledContent("Modèle brouillon", value: configuration.dflash ?? "Automatique")
+                LabeledContent("Modèle brouillon", value: abbreviatedHomePath(configuration.dflash ?? "Automatique"))
                 LabeledContent("Cache disque", value: configuration.diskCache ?? "Automatique")
                 LabeledContent("Lecture par blocs", value: configuration.prefillChunk.map(String.init) ?? "Automatique")
             }.padding(8).frame(maxWidth: .infinity, alignment: .leading)

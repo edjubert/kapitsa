@@ -64,7 +64,7 @@ struct DownloadedModelsView: View {
                             Button("Démarrer", systemImage: "play.fill") { launch(model.dir) }
                                 .buttonStyle(.borderedProminent).disabled(!model.runnable)
                         }
-                        Text(model.dir).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(abbreviatedHomePath(model.dir)).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         if model.runnable {
                             ModelCapacityBanner(query: CapacityQuery(model: model.dir, defaults: settings.defaults),
                                 alreadyRunning: model.used(by: store.rows, catalog: library.catalog),

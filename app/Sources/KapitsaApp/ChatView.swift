@@ -15,7 +15,7 @@ struct ChatWorkspace: View {
                 HStack {
                     Picker("Instance", selection: $chats.selectedInstanceID) {
                         ForEach(store.rows) { row in
-                            Text("\(row.name) · \(row.snapshot?.model ?? row.profile?.model ?? "arrêtée")").tag(row.id)
+                            Text("\(row.name) · \(abbreviatedHomePath(row.snapshot?.model ?? row.profile?.model ?? "arrêtée"))").tag(row.id)
                         }
                     }.frame(maxWidth: 430)
                     Spacer()
@@ -91,7 +91,7 @@ private struct ChatConversation: View {
             Picker("Modèle", selection: Binding(get: { session.modelID }, set: { id in
                 Task { await session.switchModel(id) }
             })) {
-                if session.models.isEmpty { Text(row.snapshot?.model ?? "Indisponible").tag("") }
+                if session.models.isEmpty { Text(abbreviatedHomePath(row.snapshot?.model ?? "Indisponible")).tag("") }
                 ForEach(session.models.filter { $0.downloaded == true }) { model in
                     Text(model.title).tag(model.id)
                 }

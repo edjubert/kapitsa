@@ -185,7 +185,7 @@ struct InstanceMenu: View {
                 Circle().fill(state.state == "ready" ? .green : .orange).frame(width: 8, height: 8)
                 Text(stateLabel(state.state))
                 Spacer()
-                Text(state.model).font(.caption).lineLimit(1)
+                Text(abbreviatedHomePath(state.model)).font(.caption).lineLimit(1)
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 if let context = state.context {

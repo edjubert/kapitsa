@@ -14,7 +14,7 @@ struct KapitsaInstanceEntity: AppEntity {
     let model: String
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(name)", subtitle: "\(model) · \(id)")
+        DisplayRepresentation(title: "\(name)", subtitle: "\(abbreviatedHomePath(model)) · \(id)")
     }
 }
 

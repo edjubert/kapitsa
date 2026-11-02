@@ -7,7 +7,7 @@ struct ChatModel: Decodable, Identifiable, Sendable {
     let downloaded: Bool?
     let contextFit: Int?
     let contextLength: Int?
-    var title: String { displayName ?? id }
+    var title: String { abbreviatedHomePath(displayName ?? id) }
 }
 
 struct ChatModels: Decodable, Sendable {

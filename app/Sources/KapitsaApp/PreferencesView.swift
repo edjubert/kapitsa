@@ -41,7 +41,7 @@ struct PreferencesView: View {
             }
             Section("Stockage") {
                 LabeledContent("Dossier des modèles") {
-                    Text(library.modelsDirectory.path).font(.caption).textSelection(.enabled)
+                    Text(abbreviatedHomePath(library.modelsDirectory.path)).font(.caption).textSelection(.enabled)
                 }
                 Button("Ouvrir dans le Finder", systemImage: "folder") {
                     NSWorkspace.shared.open(library.modelsDirectory)

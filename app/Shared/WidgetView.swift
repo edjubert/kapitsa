@@ -66,7 +66,7 @@ struct KapitsaWidgetView: View {
             }
             Label(value.state.title, systemImage: value.state.symbol)
                 .font(.subheadline.weight(.semibold)).foregroundStyle(value.state.color)
-            Text(value.model.isEmpty ? "Kapitsa" : value.model)
+            Text(value.model.isEmpty ? "Kapitsa" : abbreviatedHomePath(value.model))
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             if family == .systemLarge { details(value) }
             else if family == .systemMedium {

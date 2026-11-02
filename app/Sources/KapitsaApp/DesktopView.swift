@@ -200,7 +200,7 @@ struct InstancesWorkspace: View {
                                     row.snapshot == nil ? .gray : row.lifecycle == "ready" ? .green : .orange)
                                     .frame(width: 7, height: 7)
                             }
-                            Text(row.snapshot?.model ?? row.profile?.model ?? "Instance injoignable")
+                            Text(abbreviatedHomePath(row.snapshot?.model ?? row.profile?.model ?? "Instance injoignable"))
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             Text(lifecycleLabel(row.lifecycle))
                                 .font(.caption2).foregroundStyle(.secondary)
@@ -284,7 +284,7 @@ struct InstanceDetailView: View {
                     }
                     GroupBox("Modèle et serveur") {
                         VStack(spacing: 10) {
-                            LabeledContent("Modèle", value: state.model)
+                            LabeledContent("Modèle", value: abbreviatedHomePath(state.model))
                             if let quant = state.quant { LabeledContent("Précision", value: quant) }
                             if let used = state.memoryUsedBytes, let budget = state.memoryBudgetBytes {
                                 LabeledContent("Mémoire", value: "\(byteLabel(used)) / \(byteLabel(budget))")
