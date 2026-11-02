@@ -23,6 +23,14 @@ struct KapitsaWidgetView: View {
     let entry: KapitsaWidgetEntry
     @Environment(\.widgetFamily) private var family
 
+    private var contentSpacing: CGFloat {
+        switch family {
+        case .systemSmall: return 7
+        case .systemMedium: return 4
+        default: return 12
+        }
+    }
+
     var body: some View {
         Group {
             if let instance = entry.instance { content(instance) }
@@ -53,7 +61,7 @@ struct KapitsaWidgetView: View {
     }
 
     private func content(_ value: WidgetInstance) -> some View {
-        VStack(alignment: .leading, spacing: family == .systemSmall ? 7 : 12) {
+        VStack(alignment: .leading, spacing: contentSpacing) {
             HStack {
                 Label { Text(value.name) } icon: { KapitsaMark() }
                     .font(.headline).lineLimit(1)
