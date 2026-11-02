@@ -8,14 +8,28 @@ enum KapitsaBrand {
     static let icon = image("kapitsa-icon-1024.png")
     private static let darkMark = image("kapitsa-mark-1024.png")
     private static let lightMark = image("kapitsa-mark-light-1024.png")
+    private static let darkMenuBarMark = menuBarImage(darkMark)
+    private static let lightMenuBarMark = menuBarImage(lightMark)
     private static let darkWordmark = image("kapitsa-logo-dark-1024.png")
     private static let lightWordmark = image("kapitsa-logo-light-1024.png")
 
     static func mark(for scheme: ColorScheme) -> NSImage { scheme == .dark ? darkMark : lightMark }
+    static func menuBarMark(for scheme: ColorScheme) -> NSImage {
+        scheme == .dark ? darkMenuBarMark : lightMenuBarMark
+    }
     static func wordmark(for scheme: ColorScheme) -> NSImage { scheme == .dark ? darkWordmark : lightWordmark }
 
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Développement"
+    }
+
+    private static func menuBarImage(_ source: NSImage) -> NSImage {
+        // MenuBarExtra uses NSImage's native size, not the SwiftUI frame modifiers.
+        // Resize a copy so the full-size artwork stays available to the app and widgets.
+        let image = source.copy() as! NSImage
+        let scale = min(24 / source.size.width, 18 / source.size.height)
+        image.size = NSSize(width: source.size.width * scale, height: source.size.height * scale)
+        return image
     }
 
     private static func image(_ name: String) -> NSImage {

@@ -79,8 +79,7 @@ struct RuntimeBarLabel: View {
         Label {
             Text(store.activeRequests > 0 ? "Kapitsa · \(store.activeRequests)" : "Kapitsa")
         } icon: {
-            Image(nsImage: KapitsaBrand.mark(for: scheme))
-                .resizable().scaledToFit().frame(width: 24, height: 18)
+            Image(nsImage: KapitsaBrand.menuBarMark(for: scheme))
         }
     }
 }
